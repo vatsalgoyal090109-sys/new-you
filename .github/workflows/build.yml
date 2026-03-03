@@ -1,0 +1,97 @@
+name: Build NEW YOU APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Set app name
+        run: |
+          cat > android/app/src/main/res/values/strings.xml << 'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">NEW YOU</string>
+              <string name="title_activity_main">NEW YOU</string>
+              <string name="package_name">com.newyou.app</string>
+              <string name="custom_url_scheme">com.newyou.app</string>
+          </resources>
+          XMLEOF
+
+      - name: Process app icon
+        run: |
+          pip install Pillow --break-system-packages -q
+          python3 << 'PYEOF'
+          from PIL import Image
+          import os, sys
+
+          icon_path = 'app-icon.png'
+          if not os.path.exists(icon_path):
+              print("No app-icon.png found, using default icon")
+              sys.exit(0)
+
+          img = Image.open(icon_path).convert('RGBA')
+          w, h = img.size
+          side = min(w, h)
+          img = img.crop(((w-side)//2, (h-side)//2, (w+side)//2, (h+side)//2))
+
+          sizes = {
+              'android/app/src/main/res/mipmap-mdpi':    48,
+              'android/app/src/main/res/mipmap-hdpi':    72,
+              'android/app/src/main/res/mipmap-xhdpi':   96,
+              'android/app/src/main/res/mipmap-xxhdpi':  144,
+              'android/app/src/main/res/mipmap-xxxhdpi': 192,
+          }
+
+          for folder, size in sizes.items():
+              resized = img.resize((size, size), Image.LANCZOS)
+              resized.save(f'{folder}/ic_launcher.png', 'PNG')
+              resized.save(f'{folder}/ic_launcher_round.png', 'PNG')
+              print(f'Set icon {size}x{size} in {folder}')
+          PYEOF
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build debug APK
+        run: cd android && ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEW-YOU-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

@@ -305,6 +305,18 @@ body.light-theme .modal-box { background: #f0f4ff; }
 const RANKS = ['E','D','C','B','A','S','MONARCH'];
 const RANK_COLORS = { E:'#6a7a9a', D:'#4CAF50', C:'#4FC3F7', B:'#9B59B6', A:'#F39C12', S:'#E74C3C', MONARCH:'#FFD700' };
 const RANK_LEVELS = { E:1, D:10, C:25, B:45, A:70, S:100, MONARCH:200 };
+const RANK_MAX_HP = { E:100, D:200, C:400, B:800, A:1600, S:3200, MONARCH:10000 };
+// XP boost granted on each level up per rank
+// { mult, durationHours, permanent }
+const RANK_BOOST = {
+  E:       { mult:2,  durationHours:24,  permanent:false },
+  D:       { mult:3,  durationHours:24,  permanent:false },
+  C:       { mult:3,  durationHours:48,  permanent:false },
+  B:       { mult:4,  durationHours:48,  permanent:false },
+  A:       { mult:5,  durationHours:72,  permanent:false },
+  S:       { mult:3,  durationHours:0,   permanent:true  },
+  MONARCH: { mult:10, durationHours:0,   permanent:true  },
+};
 const RANK_TEXTS = {
   E:"You have just awakened. The journey begins.",
   D:"Weak but aware. Potential detected.",
@@ -467,7 +479,7 @@ function todayStr() { return new Date().toISOString().slice(0,10); }
 
 // ─── INITIAL STATE ────────────────────────────────────────────────────────────
 const buildInitialState = () => ({
-  hunter: { name:"", class:"", rank:"E", level:1, totalXP:0, xpToNextLevel:1000, title:"The Weakest", createdAt:null, coins:0, equippedTitle:null, equippedBadge:null },
+  hunter: { name:"", class:"", rank:"E", level:1, totalXP:0, xpToNextLevel:1000, title:"The Weakest", createdAt:null, coins:0, equippedTitle:null, equippedBadge:null, boostMult:1, boostEnd:null, hp:100, maxHp:100 },
   stats: { strength:1, intelligence:1, discipline:1, vitality:1, focus:1, charisma:1 },
   muscles: {
     chest:{level:0,xp:0,trained:0}, frontDelts:{level:0,xp:0,trained:0}, sideDelts:{level:0,xp:0,trained:0},
@@ -521,22 +533,64 @@ function reducer(state, action) {
     }
     case 'GAIN_XP': {
       const amount = action.payload;
-      let { totalXP, level, xpToNextLevel, rank, title } = state.hunter;
-      const coinsEarned = Math.floor(amount / 50); // 1 coin per 50 XP
+      let { totalXP, level, xpToNextLevel, rank, title, boostMult, boostEnd } = state.hunter;
+
+      // Check if timed boost has expired
+      if (boostEnd && Date.now() > boostEnd) { boostMult = 1; boostEnd = null; }
+
+      // Apply current boost to incoming XP
+      const activeMult = (boostMult && boostMult > 1) ? boostMult : 1;
+      const boostedAmount = Math.round(amount * activeMult);
+
+      const coinsEarned = Math.floor(boostedAmount / 50);
       const newCoins = (state.hunter.coins || 0) + coinsEarned;
-      totalXP += amount;
+      totalXP += boostedAmount;
       let leveled = false;
       let newRank = rank;
+      let rankChanged = false;
       while (totalXP >= xpToNextLevel) {
         totalXP -= xpToNextLevel;
         level++;
         xpToNextLevel = xpForLevel(level);
         leveled = true;
+        const prevRank = newRank;
         newRank = getRankForLevel(level);
+        if (newRank !== prevRank) rankChanged = true;
         title = getTitle(level);
       }
-      return { ...state, hunter:{...state.hunter, totalXP, level, xpToNextLevel, rank:newRank, title, coins:newCoins},
-        _leveled: leveled ? { level, rank:newRank, title } : null };
+
+      // Grant boost on level up
+      let newBoostMult = boostMult || 1;
+      let newBoostEnd = boostEnd || null;
+      if (leveled) {
+        const boost = RANK_BOOST[newRank];
+        if (boost) {
+          if (boost.permanent) {
+            newBoostMult = boost.mult;
+            newBoostEnd = null;
+          } else {
+            // Only upgrade boost if new one is better or current has expired
+            const currentExpired = !newBoostEnd || Date.now() > newBoostEnd;
+            const newIsBetter = boost.mult > (newBoostMult || 1);
+            if (currentExpired || newIsBetter) {
+              newBoostMult = boost.mult;
+              newBoostEnd = Date.now() + boost.durationHours * 3600 * 1000;
+            } else {
+              // Extend existing boost by the duration
+              newBoostEnd = (newBoostEnd || Date.now()) + boost.durationHours * 3600 * 1000;
+            }
+          }
+        }
+      }
+
+      return {
+        ...state,
+        hunter: { ...state.hunter, totalXP, level, xpToNextLevel, rank:newRank, title, coins:newCoins, boostMult:newBoostMult, boostEnd:newBoostEnd,
+          maxHp: RANK_MAX_HP[newRank] || 100,
+          hp: rankChanged ? RANK_MAX_HP[newRank] : (state.hunter.hp ?? state.hunter.maxHp ?? 100), // full heal on rank up
+        },
+        _leveled: leveled ? { level, rank:newRank, title, rankChanged, boostMult:newBoostMult, boostEnd:newBoostEnd, boostedAmount } : null,
+      };
     }
     case 'PURCHASE_REWARD': {
       const { id, cost, item } = action.payload;
@@ -576,6 +630,29 @@ function reducer(state, action) {
     case 'KEEP_ANTI_TODO': {
       const antiTodo = (state.antiTodo||[]).map(a => a.id===action.payload ? {...a, lastKept:Date.now(), streak:(a.streak||0)+1} : a);
       return { ...state, antiTodo };
+    }
+    case 'APPLY_PENALTY': {
+      // Deduct 0.5x of task XP from totalXP, and reduce HP based on task size
+      const { xp } = action.payload;
+      const deduction = Math.round(xp * 0.5);
+      const hpLoss = Math.floor(xp / 3000) * 5 || 1; // -5 HP per 3000 XP task, min 1
+      const currentHp = state.hunter.hp ?? state.hunter.maxHp ?? 100;
+      const newHp = Math.max(0, currentHp - hpLoss);
+      const newTotalXP = Math.max(0, (state.hunter.totalXP || 0) - deduction);
+      const isDead = newHp <= 0;
+      return {
+        ...state,
+        hunter: { ...state.hunter, totalXP: newTotalXP, hp: newHp },
+        _penaltyData: { xpLost: deduction, hpLost: hpLoss, isDead },
+      };
+    }
+    case 'HEAL_HP': {
+      const maxHp = state.hunter.maxHp || RANK_MAX_HP[state.hunter.rank] || 100;
+      const newHp = Math.min(maxHp, (state.hunter.hp || 0) + (action.payload || 10));
+      return { ...state, hunter: { ...state.hunter, hp: newHp } };
+    }
+    case 'CLEAR_PENALTY': {
+      return { ...state, _penaltyData: null };
     }
     case 'EQUIP_REWARD': {
       const { type, value } = action.payload;
@@ -842,8 +919,8 @@ function XPFloat({ floats, removeFloat }) {
   return (
     <>
       {floats.map(f => (
-        <div key={f.id} className="xp-float" style={{ left: f.x, top: f.y }}>
-          +{f.amount} XP
+        <div key={f.id} className="xp-float" style={{ left: f.x, top: f.y, color: f.boosted ? '#F39C12' : 'var(--gold)' }}>
+          +{f.amount} XP{f.boosted ? ' ⚡' : ''}
         </div>
       ))}
     </>
@@ -912,6 +989,30 @@ function LevelUpOverlay({ data, onClose }) {
             <div style={{ marginTop:6, fontSize:12, color:'#6a7a9a' }}>
               {data.rank}-RANK &nbsp;·&nbsp; Levels {getRankRange(data.rank)}
             </div>
+            {data.boostMult && data.boostMult > 1 && (
+              <div style={{
+                marginTop:20, padding:'12px 20px',
+                background: 'rgba(243,156,18,0.12)',
+                border: '1px solid rgba(243,156,18,0.5)',
+                borderRadius:10,
+                boxShadow: '0 0 20px rgba(243,156,18,0.2)'
+              }}>
+                <div style={{ fontSize:11, color:'#F39C1288', letterSpacing:4, marginBottom:6 }}>⚡ XP BOOST ACTIVATED</div>
+                <div className="cinzel" style={{ fontSize:28, color:'#F39C12', fontWeight:900, textShadow:'0 0 20px #F39C12' }}>
+                  {data.boostMult}x XP
+                </div>
+                <div style={{ fontSize:12, color:'#F39C12aa', marginTop:4 }}>
+                  {data.boostEnd
+                    ? (() => {
+                        const ms = data.boostEnd - Date.now();
+                        const hrs = Math.round(ms / 3600000);
+                        return hrs >= 24 ? `${Math.round(hrs/24)} days` : `${hrs} hours`;
+                      })()
+                    : 'PERMANENT'
+                  }
+                </div>
+              </div>
+            )}
           </>
         )}
         <div style={{ marginTop:32, fontSize:11, color:'#6a7a9a', letterSpacing:2 }}>TAP TO CONTINUE</div>
@@ -1461,6 +1562,26 @@ function StatusScreen({ state, dispatch, addXP }) {
           </div>
         </div>
         <XPBar current={hunter.totalXP} needed={hunter.xpToNextLevel}/>
+        {/* HP Mini Bar */}
+        {(() => {
+          const maxHp = hunter.maxHp || RANK_MAX_HP[hunter.rank] || 100;
+          const hp = hunter.hp ?? maxHp;
+          const pct = Math.max(0, Math.min(100, (hp/maxHp)*100));
+          const col = pct > 60 ? '#2ECC71' : pct > 30 ? '#F39C12' : '#E74C3C';
+          return (
+            <div style={{ marginTop:8 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                <span style={{ fontSize:9, color: pct<=30?'var(--crimson)':'var(--text-dim)', letterSpacing:2 }}>
+                  {pct<=30 ? '⚠️ HP LOW' : '❤️ HP'}
+                </span>
+                <span style={{ fontSize:9, color:col }}>{Math.round(hp)} / {maxHp}</span>
+              </div>
+              <div style={{ height:5, background:'rgba(255,255,255,0.06)', borderRadius:3, overflow:'hidden' }}>
+                <div style={{ height:'100%', width:`${pct}%`, background:`linear-gradient(90deg,${col}88,${col})`, borderRadius:3, transition:'width 0.5s', boxShadow:`0 0 6px ${col}66` }}/>
+              </div>
+            </div>
+          );
+        })()}
         <div style={{ display:'flex', justifyContent:'space-between', marginTop:12, gap:8 }}>
           <div style={{ flex:1, textAlign:'center', padding:'10px 6px', background:'rgba(79,195,247,0.05)', borderRadius:6, border:'1px solid var(--border)' }}>
             <div className="cinzel" style={{ fontSize:16, color:'var(--mana)' }}>{dailyDone}/{totalDaily}</div>
@@ -1483,6 +1604,46 @@ function StatusScreen({ state, dispatch, addXP }) {
         <div className="cinzel" style={{ fontSize:12, color:'var(--text-dim)', letterSpacing:3, marginBottom:14 }}>CORE ATTRIBUTES</div>
         <RadarChart stats={stats}/>
       </div>
+
+      {/* XP Boost Panel */}
+      {(() => {
+        const boost = hunter.boostMult && hunter.boostMult > 1;
+        const expired = hunter.boostEnd && Date.now() > hunter.boostEnd;
+        const permanent = boost && !hunter.boostEnd;
+        if (!boost || expired) return null;
+        const msLeft = hunter.boostEnd ? hunter.boostEnd - Date.now() : null;
+        const hrsLeft = msLeft ? Math.ceil(msLeft / 3600000) : null;
+        const timeStr = permanent ? 'PERMANENT' : hrsLeft >= 24 ? `${Math.ceil(hrsLeft/24)}d remaining` : `${hrsLeft}h remaining`;
+        return (
+          <div className="panel" style={{ padding:16, flexShrink:0, borderColor:'rgba(243,156,18,0.4)', background:'rgba(243,156,18,0.05)', boxShadow:'0 0 20px rgba(243,156,18,0.1)' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <div>
+                <div className="cinzel" style={{ fontSize:11, color:'#F39C1288', letterSpacing:3, marginBottom:4 }}>⚡ XP BOOST ACTIVE</div>
+                <div className="cinzel" style={{ fontSize:32, color:'#F39C12', fontWeight:900, textShadow:'0 0 15px #F39C12', lineHeight:1 }}>
+                  {hunter.boostMult}x XP
+                </div>
+                <div style={{ fontSize:11, color:'#F39C12aa', marginTop:4 }}>{timeStr}</div>
+              </div>
+              <div style={{ textAlign:'right' }}>
+                <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:4 }}>{hunter.rank}-RANK BOOST</div>
+                <div style={{ fontSize:10, color:'var(--text-dim)' }}>All XP ×{hunter.boostMult}</div>
+              </div>
+            </div>
+            {!permanent && msLeft && (
+              <div style={{ marginTop:10 }}>
+                <div style={{ height:4, background:'rgba(243,156,18,0.1)', borderRadius:2, overflow:'hidden' }}>
+                  <div style={{
+                    height:'100%', borderRadius:2,
+                    background:'linear-gradient(90deg, #F39C12, #FFD700)',
+                    width:`${Math.min(100, (msLeft / (RANK_BOOST[hunter.rank]?.durationHours * 3600000 || 1)) * 100)}%`,
+                    transition:'width 1s linear'
+                  }}/>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Daily Quest Preview */}
       <div className="panel" style={{ padding:16, flexShrink:0 }}>
@@ -1521,7 +1682,7 @@ function StatusScreen({ state, dispatch, addXP }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // QUESTS SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-function QuestsScreen({ state, dispatch, addXP, showNotif, sfx }) {
+function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) {
   const [tab, setTab] = useState('daily');
   const [showAddMain, setShowAddMain] = useState(false);
   const [showAddDaily, setShowAddDaily] = useState(false);
@@ -1530,6 +1691,19 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx }) {
   const [newQuest, setNewQuest] = useState({ name:'', xp:100, target:1, desc:'', statReward:'', statAmount:1, rewardId:'' });
   const [newSideQuest, setNewSideQuest] = useState({ name:'', desc:'', xp:100, statRewards:[{stat:'',amount:1},{stat:'',amount:1}] });
   const today = todayStr();
+
+  const failQuest = (q) => {
+    applyPenalty(q.xp, `Failed quest: ${q.name}`);
+    dispatch({ type:'DELETE_DAILY_QUEST', payload: q.id });
+  };
+  const failWeekly = (q) => {
+    applyPenalty(q.xp, `Failed weekly: ${q.name}`);
+    dispatch({ type:'DELETE_WEEKLY_QUEST', payload: q.id });
+  };
+  const failMain = (q) => {
+    applyPenalty(q.xp, `Failed main quest: ${q.name}`);
+    dispatch({ type:'DELETE_MAIN_QUEST', payload: q.id });
+  };
 
   const completeDaily = (q) => {
     if (q.completed) return;
@@ -1633,7 +1807,7 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx }) {
               ⚡ Resets at midnight — Daily Dungeon
             </div>
             {state.quests.daily.map(q=>(
-              <QuestCard key={q.id} quest={q} completed={q.completed && q.date===today} onComplete={()=>completeDaily(q)} onDelete={()=>dispatch({type:'DELETE_DAILY_QUEST',payload:q.id})} color="var(--mana)" customRewards={customRewards}/>
+              <QuestCard key={q.id} quest={q} completed={q.completed && q.date===today} onComplete={()=>completeDaily(q)} onDelete={()=>dispatch({type:'DELETE_DAILY_QUEST',payload:q.id})} onFail={()=>failQuest(q)} color="var(--mana)" customRewards={customRewards}/>
             ))}
             <button className="btn-mana" onClick={()=>setShowAddDaily(true)} style={{ width:'100%', marginTop:8 }}>
               + ADD CUSTOM DAILY QUEST
@@ -1651,7 +1825,7 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx }) {
               </div>
             )}
             {state.quests.weekly.map(q=>(
-              <QuestCard key={q.id} quest={q} completed={q.completed} onComplete={()=>completeWeekly(q)} onDelete={()=>dispatch({type:'DELETE_WEEKLY_QUEST',payload:q.id})} color="var(--violet)" showProgress customRewards={customRewards}/>
+              <QuestCard key={q.id} quest={q} completed={q.completed} onComplete={()=>completeWeekly(q)} onDelete={()=>dispatch({type:'DELETE_WEEKLY_QUEST',payload:q.id})} onFail={()=>failWeekly(q)} color="var(--violet)" showProgress customRewards={customRewards}/>
             ))}
             <button className="btn-mana" onClick={()=>setShowAddWeekly(true)} style={{ width:'100%', marginTop:8, borderColor:'var(--violet)', color:'var(--violet)' }}>
               + ADD WEEKLY QUEST
@@ -1669,7 +1843,7 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx }) {
               </div>
             )}
             {state.quests.main.map(q=>(
-              <QuestCard key={q.id} quest={q} completed={q.completed} onComplete={()=>completeMain(q)} onDelete={()=>dispatch({type:'DELETE_MAIN_QUEST',payload:q.id})} color="var(--gold)" customRewards={customRewards}/>
+              <QuestCard key={q.id} quest={q} completed={q.completed} onComplete={()=>completeMain(q)} onDelete={()=>dispatch({type:'DELETE_MAIN_QUEST',payload:q.id})} onFail={()=>failMain(q)} color="var(--gold)" customRewards={customRewards}/>
             ))}
             <button className="btn-gold" onClick={()=>setShowAddMain(true)} style={{ width:'100%', marginTop:8 }}>
               + DEFINE MAIN QUEST
@@ -1724,6 +1898,16 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx }) {
                   </div>
                   <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6, flexShrink:0 }}>
                     <div className="cinzel" style={{ fontSize:12, color:'var(--gold)' }}>+{q.xp} XP</div>
+                    {!q.completed && (
+                      <button onClick={()=>{
+                        applyPenalty(q.xp, `Failed side quest: ${q.name}`);
+                        dispatch({type:'DELETE_SIDE_QUEST', payload:q.id});
+                      }} style={{
+                        background:'rgba(231,76,60,0.15)', border:'1px solid rgba(231,76,60,0.5)', borderRadius:4,
+                        color:'var(--crimson)', fontSize:9, padding:'3px 7px', cursor:'pointer',
+                        fontFamily:'Cinzel,serif', letterSpacing:1
+                      }}>FAIL</button>
+                    )}
                     <button onClick={()=>dispatch({type:'DELETE_SIDE_QUEST',payload:q.id})} style={{
                       background:'none', border:'none', cursor:'pointer', color:'rgba(231,76,60,0.4)', padding:2, display:'flex', alignItems:'center'
                     }}
@@ -1941,7 +2125,7 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx }) {
   );
 }
 
-function QuestCard({ quest, completed, onComplete, onDelete, color, showProgress, customRewards }) {
+function QuestCard({ quest, completed, onComplete, onDelete, onFail, color, showProgress, customRewards }) {
   const linkedReward = customRewards && quest.rewardId ? customRewards.find(r=>r.id===quest.rewardId) : null;
   return (
     <div className="panel" style={{
@@ -1979,6 +2163,13 @@ function QuestCard({ quest, completed, onComplete, onDelete, color, showProgress
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
           <div className="cinzel" style={{ fontSize:12, color:'var(--gold)' }}>+{quest.xp} XP</div>
+          {onFail && !completed && (
+            <button onClick={e=>{ e.stopPropagation(); onFail(); }} style={{
+              background:'rgba(231,76,60,0.15)', border:'1px solid rgba(231,76,60,0.5)', borderRadius:4,
+              color:'var(--crimson)', fontSize:9, padding:'3px 7px', cursor:'pointer',
+              fontFamily:'Cinzel,serif', letterSpacing:1
+            }}>FAIL</button>
+          )}
           {onDelete && (
             <button onClick={e=>{ e.stopPropagation(); onDelete(); }} style={{
               background:'none', border:'none', cursor:'pointer', color:'rgba(231,76,60,0.4)',
@@ -2427,7 +2618,7 @@ const DEFAULT_HABITS = [
 ];
 const HABIT_COLORS = { Physical:'var(--mana)', Mental:'var(--violet)', Lifestyle:'#2ECC71', Custom:'var(--gold)' };
 
-function HabitsScreen({ state, dispatch, addXP, showNotif, sfx }) {
+function HabitsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) {
   const [showAdd, setShowAdd] = useState(false);
   const [newHabit, setNewHabit] = useState({ name:'', category:'Physical', xpPerCompletion:30, icon:'⚡', frequency:'daily' });
   const today = todayStr();
@@ -2441,6 +2632,11 @@ function HabitsScreen({ state, dispatch, addXP, showNotif, sfx }) {
     sfx('habitComplete');
     dispatch({ type:'GAIN_STAT', payload:{ stat:'discipline', amount:1 } });
     showNotif(`🔥 STREAK: ${h.streak+1}`);
+  };
+
+  const failHabit = (h) => {
+    applyPenalty(h.xpPerCompletion, `Failed habit: ${h.name}`);
+    dispatch({ type:'COMPLETE_HABIT', payload:h.id }); // mark done so they can't re-fail
   };
 
   return (
@@ -2511,6 +2707,15 @@ function HabitsScreen({ state, dispatch, addXP, showNotif, sfx }) {
                   background:'none', border:'none', cursor:'pointer', color:'var(--crimson)', opacity:0.4, padding:'4px'
                 }}><Trash2 size={12}/></button>
               </div>
+              {!done && (
+                <div style={{ marginTop:8, paddingTop:8, borderTop:'1px solid rgba(255,255,255,0.04)', display:'flex', justifyContent:'flex-end' }}>
+                  <button onClick={()=>failHabit(h)} style={{
+                    background:'rgba(231,76,60,0.1)', border:'1px solid rgba(231,76,60,0.4)', borderRadius:4,
+                    color:'var(--crimson)', fontSize:9, padding:'4px 10px', cursor:'pointer',
+                    fontFamily:'Cinzel,serif', letterSpacing:1
+                  }}>❌ FAILED TODAY</button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -2996,6 +3201,12 @@ const REWARDS_CATALOG = [
   { id:'xp_boost_1', type:'XPBoost', name:'Mana Surge I',    desc:'+500 instant XP',   cost:20,  minRank:'E', icon:'⚡', category:'XP Boosts', xpGrant:500  },
   { id:'xp_boost_2', type:'XPBoost', name:'Mana Surge II',   desc:'+2000 instant XP',  cost:60,  minRank:'C', icon:'💥', category:'XP Boosts', xpGrant:2000 },
   { id:'xp_boost_3', type:'XPBoost', name:'Mana Cascade',    desc:'+10000 instant XP', cost:200, minRank:'A', icon:'🌊', category:'XP Boosts', xpGrant:10000},
+
+  // HEALTH POTIONS
+  { id:'potion_small',  type:'Potion', name:'Health Potion',       desc:'Restores 150 HP instantly.',     cost:1000, minRank:'E', icon:'🧪', category:'Potions', hpGrant:150  },
+  { id:'potion_medium', type:'Potion', name:'Greater Health Potion',desc:'Restores 400 HP instantly.',    cost:2500, minRank:'C', icon:'🍶', category:'Potions', hpGrant:400  },
+  { id:'potion_large',  type:'Potion', name:'Elixir of Vitality',  desc:'Restores 1000 HP instantly.',   cost:6000, minRank:'A', icon:'💎', category:'Potions', hpGrant:1000 },
+  { id:'potion_full',   type:'Potion', name:'Phoenix Elixir',      desc:'Fully restores HP to maximum.', cost:15000,minRank:'S', icon:'🔥', category:'Potions', hpGrant:'full'},
 ];
 
 const RANK_ORDER = ['E','D','C','B','A','S','MONARCH'];
@@ -3012,9 +3223,24 @@ function RewardsScreen({ state, dispatch, addXP, showNotif, sfx }) {
   const hunterRank = state.hunter.rank;
   const customRewards = state.customRewards || [];
 
-  const CATS = ['Titles','Boosts','Badges','XP Boosts','Custom'];
+  const CATS = ['Titles','Boosts','Badges','XP Boosts','Potions','Custom'];
 
   const purchase = (item) => {
+    if (item.type === 'Potion') {
+      if (coins < item.cost) return;
+      const maxHp = state.hunter.maxHp || RANK_MAX_HP[state.hunter.rank] || 100;
+      const currentHp = state.hunter.hp ?? maxHp;
+      const healAmt = item.hpGrant === 'full' ? maxHp - currentHp : item.hpGrant;
+      const actualHeal = Math.min(healAmt, maxHp - currentHp);
+      dispatch({ type:'PURCHASE_REWARD', payload:{ id: item.id + '_' + Date.now(), cost: item.cost, item:{ ...item } } });
+      dispatch({ type:'HEAL_HP', payload: healAmt });
+      sfx('purchase');
+      showNotif(`🧪 +${actualHeal} HP RESTORED`);
+      setJustBought(item.id);
+      setTimeout(() => setJustBought(null), 2000);
+      setConfirmItem(null);
+      return;
+    }
     if (item.type === 'XPBoost') {
       if (coins < item.cost) return;
       dispatch({ type:'PURCHASE_REWARD', payload:{ id: item.id + '_' + Date.now(), cost: item.cost, item:{ ...item, type:'XPBoost' } } });
@@ -3069,6 +3295,97 @@ function RewardsScreen({ state, dispatch, addXP, showNotif, sfx }) {
         </div>
       </div>
       <div className="scrollable" style={{ flex:1, padding:'0 16px 16px' }}>
+        {cat === 'Potions' && (() => {
+          const maxHp = state.hunter.maxHp || RANK_MAX_HP[state.hunter.rank] || 100;
+          const currentHp = Math.round(state.hunter.hp ?? maxHp);
+          const hpPct = Math.min(100, (currentHp / maxHp) * 100);
+          const hpColor = hpPct > 60 ? '#2ECC71' : hpPct > 30 ? '#F39C12' : '#E74C3C';
+          const potions = REWARDS_CATALOG.filter(r => r.category === 'Potions');
+          return (
+            <>
+              {/* Current HP panel */}
+              <div className="panel" style={{ padding:16, marginBottom:16, borderColor:'rgba(231,76,60,0.3)' }}>
+                <div className="cinzel" style={{ fontSize:11, color:'var(--text-dim)', letterSpacing:3, marginBottom:10 }}>❤️ CURRENT HP</div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:8 }}>
+                  <span className="cinzel" style={{ fontSize:26, color:hpColor, fontWeight:900, textShadow:`0 0 12px ${hpColor}` }}>
+                    {currentHp}
+                  </span>
+                  <span style={{ fontSize:12, color:'var(--text-dim)' }}>/ {maxHp} MAX</span>
+                </div>
+                <div style={{ height:8, background:'rgba(255,255,255,0.06)', borderRadius:4, overflow:'hidden' }}>
+                  <div style={{ height:'100%', width:`${hpPct}%`, background:`linear-gradient(90deg,${hpColor}88,${hpColor})`, borderRadius:4, transition:'width 0.5s', boxShadow:`0 0 8px ${hpColor}66` }}/>
+                </div>
+                {currentHp >= maxHp && (
+                  <div style={{ marginTop:8, fontSize:11, color:'#2ECC71', textAlign:'center' }}>✓ HP IS FULL — No need for potions</div>
+                )}
+              </div>
+
+              {/* Potion cards */}
+              {potions.map(item => {
+                const canAfford = coins >= item.cost;
+                const isFull = currentHp >= maxHp;
+                const healAmt = item.hpGrant === 'full' ? maxHp - currentHp : item.hpGrant;
+                const afterHp = Math.min(maxHp, currentHp + (item.hpGrant === 'full' ? maxHp : item.hpGrant));
+                const rankOk = rankGte(state.hunter.rank, item.minRank);
+                return (
+                  <div key={item.id} className="panel" style={{
+                    padding:16, marginBottom:12,
+                    borderColor: canAfford && rankOk ? 'rgba(231,76,60,0.4)' : 'var(--border)',
+                    background: canAfford && rankOk ? 'rgba(231,76,60,0.05)' : 'var(--card)',
+                    opacity: rankOk ? 1 : 0.5,
+                    transition:'all 0.2s'
+                  }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:12 }}>
+                      <div style={{
+                        width:48, height:48, borderRadius:12, display:'flex', alignItems:'center', justifyContent:'center',
+                        fontSize:26, background:'rgba(231,76,60,0.1)', border:'1px solid rgba(231,76,60,0.3)',
+                        boxShadow: canAfford && rankOk ? '0 0 12px rgba(231,76,60,0.2)' : 'none'
+                      }}>{item.icon}</div>
+                      <div style={{ flex:1 }}>
+                        <div className="cinzel" style={{ fontSize:14, color: canAfford&&rankOk ? '#E74C3C' : 'var(--text-dim)', marginBottom:2 }}>{item.name}</div>
+                        <div style={{ fontSize:11, color:'var(--text-dim)' }}>{item.desc}</div>
+                        {!rankOk && <div style={{ fontSize:10, color:'var(--crimson)', marginTop:4 }}>Requires {item.minRank}-Rank</div>}
+                      </div>
+                      <div style={{ textAlign:'right' }}>
+                        <div className="cinzel" style={{ fontSize:14, color:'var(--gold)' }}>🪙 {item.cost.toLocaleString()}</div>
+                        <div style={{ fontSize:10, color: canAfford ? '#2ECC71' : 'var(--crimson)', marginTop:4 }}>
+                          {canAfford ? 'Can afford' : `Need ${(item.cost - coins).toLocaleString()} more`}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* HP preview bar */}
+                    {rankOk && !isFull && (
+                      <div style={{ marginBottom:10 }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'var(--text-dim)', marginBottom:4 }}>
+                          <span>HP after use</span>
+                          <span style={{ color:'#2ECC71' }}>{currentHp} → {afterHp} (+{item.hpGrant==='full'?healAmt:Math.min(item.hpGrant, maxHp-currentHp)})</span>
+                        </div>
+                        <div style={{ height:6, background:'rgba(255,255,255,0.06)', borderRadius:3, overflow:'hidden', position:'relative' }}>
+                          <div style={{ position:'absolute', height:'100%', width:`${hpPct}%`, background:`${hpColor}66`, borderRadius:3 }}/>
+                          <div style={{ position:'absolute', height:'100%', left:`${hpPct}%`, width:`${Math.min(100-hpPct, (afterHp-currentHp)/maxHp*100)}%`, background:'#2ECC7199', borderRadius:3 }}/>
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => { if (canAfford && rankOk && !isFull) setConfirmItem(item); }}
+                      disabled={!canAfford || !rankOk || isFull}
+                      style={{
+                        width:'100%', padding:'10px', borderRadius:6, cursor: canAfford&&rankOk&&!isFull ? 'pointer' : 'not-allowed',
+                        background: canAfford&&rankOk&&!isFull ? 'rgba(231,76,60,0.15)' : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${canAfford&&rankOk&&!isFull ? 'var(--crimson)' : 'var(--border)'}`,
+                        color: canAfford&&rankOk&&!isFull ? 'var(--crimson)' : 'var(--text-dim)',
+                        fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:2,
+                      }}>
+                      {isFull ? 'HP IS FULL' : !rankOk ? `REQUIRES ${item.minRank}-RANK` : !canAfford ? `NEED ${(item.cost-coins).toLocaleString()} MORE 🪙` : `🧪 USE POTION — 🪙 ${item.cost.toLocaleString()}`}
+                    </button>
+                  </div>
+                );
+              })}
+            </>
+          );
+        })()}
         {cat === 'Custom' && (
           <>
             <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:12, lineHeight:1.6 }}>Define real-world rewards you can earn by completing quests. Link them to quests in the Quest creation screen.</div>
@@ -3095,7 +3412,7 @@ function RewardsScreen({ state, dispatch, addXP, showNotif, sfx }) {
             ))}
           </>
         )}
-        {cat !== 'Custom' && filtered.map(item => {
+        {cat !== 'Custom' && cat !== 'Potions' && filtered.map(item => {
           const isOwned = item.type !== 'XPBoost' && owned.includes(item.id);
           const canAfford = coins >= item.cost;
           const rankOk = rankGte(hunterRank, item.minRank);
@@ -3678,21 +3995,55 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
   const [notifTime, setNotifTime] = useState(state.notifications?.time || '08:00');
   const soundEnabled = state.soundEnabled !== false;
 
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [exportText, setExportText] = useState('');
+  const [copied, setCopied] = useState(false);
+
   const exportData = () => {
     const json = JSON.stringify(state, null, 2);
-    const blob = new Blob([json], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ARISE_backup_${new Date().toISOString().slice(0,10)}.json`;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showNotif('💾 DATA EXPORTED');
+    setExportText(json);
+    setShowExportModal(true);
+    setCopied(false);
+    // Also try native download as fallback for browsers
+    try {
+      const blob = new Blob([json], { type:'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `NEWYOU_backup_${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch(e) {}
+  };
+
+  const copyToClipboard = () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(exportText).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        });
+      } else {
+        // Fallback for older WebViews
+        const ta = document.createElement('textarea');
+        ta.value = exportText;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch(e) { showNotif('❌ COPY FAILED — Select text manually'); }
   };
 
   const importData = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
@@ -3705,6 +4056,18 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
       }
     };
     reader.readAsText(file);
+  };
+
+  const importFromText = () => {
+    try {
+      const data = JSON.parse(importText.trim());
+      dispatch({ type:'LOAD_STATE', payload:data });
+      setShowImportModal(false);
+      setImportText('');
+      showNotif('✅ PROGRESS RESTORED');
+    } catch(err) {
+      showNotif('❌ INVALID DATA — Check your backup text');
+    }
   };
 
   const requestNotifications = async () => {
@@ -3843,26 +4206,87 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
 
           <div style={{ marginBottom:12 }}>
             <div style={{ fontSize:13, color:'var(--text)', marginBottom:4 }}>Export Backup</div>
-            <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:10 }}>Download all your progress as a JSON file. Keep it safe.</div>
+            <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:10 }}>Save your progress as text. Copy it and store it somewhere safe.</div>
             <button className="btn-mana" style={{ width:'100%' }} onClick={exportData}>
-              📤 EXPORT ALL DATA
+              📤 EXPORT PROGRESS
             </button>
           </div>
 
           <div style={{ borderTop:'1px solid var(--border)', paddingTop:12 }}>
             <div style={{ fontSize:13, color:'var(--text)', marginBottom:4 }}>Import Backup</div>
-            <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:10 }}>Restore from a previous backup file. ⚠️ This overwrites current data.</div>
-            <label style={{
+            <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:10 }}>Paste your backup text to restore progress. ⚠️ Overwrites current data.</div>
+            <button style={{
               display:'block', width:'100%', padding:'8px 16px', textAlign:'center',
               background:'rgba(155,89,182,0.15)', border:'1px solid var(--violet)',
               borderRadius:6, color:'var(--violet)', fontSize:12, cursor:'pointer',
               fontFamily:'Cinzel,serif', letterSpacing:1
-            }}>
+            }} onClick={()=>{ setImportText(''); setShowImportModal(true); }}>
               📥 IMPORT BACKUP
-              <input type="file" accept=".json" onChange={importData} style={{ display:'none' }}/>
-            </label>
+            </button>
           </div>
         </div>
+
+        {/* Export Modal */}
+        {showExportModal && (
+          <div className="modal-overlay" onClick={()=>setShowExportModal(false)}>
+            <div className="modal-box" onClick={e=>e.stopPropagation()} style={{ maxHeight:'80vh', display:'flex', flexDirection:'column' }}>
+              <div className="cinzel" style={{ color:'var(--mana)', fontSize:16, marginBottom:8 }}>📤 YOUR BACKUP</div>
+              <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:12 }}>
+                Tap <strong style={{color:'var(--mana)'}}>COPY ALL</strong> then paste it in Notes, Google Drive, or anywhere safe.
+              </div>
+              <textarea
+                readOnly
+                value={exportText}
+                style={{
+                  flex:1, minHeight:180, maxHeight:260, background:'rgba(0,0,0,0.4)',
+                  border:'1px solid var(--border)', borderRadius:6, color:'var(--text-dim)',
+                  fontSize:10, padding:10, fontFamily:'monospace', resize:'none',
+                  marginBottom:12
+                }}
+                onFocus={e=>e.target.select()}
+              />
+              <div style={{ display:'flex', gap:8 }}>
+                <button className="btn-mana" style={{ flex:1, fontSize:13 }} onClick={copyToClipboard}>
+                  {copied ? '✅ COPIED!' : '📋 COPY ALL'}
+                </button>
+                <button className="btn-danger" style={{ flex:1 }} onClick={()=>setShowExportModal(false)}>CLOSE</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Import Modal */}
+        {showImportModal && (
+          <div className="modal-overlay" onClick={()=>setShowImportModal(false)}>
+            <div className="modal-box" onClick={e=>e.stopPropagation()} style={{ maxHeight:'80vh', display:'flex', flexDirection:'column' }}>
+              <div className="cinzel" style={{ color:'var(--violet)', fontSize:16, marginBottom:8 }}>📥 RESTORE BACKUP</div>
+              <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:12 }}>
+                Paste your previously exported backup text below.
+              </div>
+              <textarea
+                value={importText}
+                onChange={e=>setImportText(e.target.value)}
+                placeholder='Paste your backup JSON here...'
+                style={{
+                  flex:1, minHeight:200, maxHeight:280, background:'rgba(0,0,0,0.4)',
+                  border:'1px solid var(--border)', borderRadius:6, color:'var(--text)',
+                  fontSize:11, padding:10, fontFamily:'monospace', resize:'none',
+                  marginBottom:12
+                }}
+              />
+              <div style={{ display:'flex', gap:8 }}>
+                <button style={{
+                  flex:1, padding:'11px', borderRadius:6, cursor:'pointer',
+                  background:'rgba(155,89,182,0.15)', border:'1px solid var(--violet)',
+                  color:'var(--violet)', fontFamily:'Cinzel,serif', fontSize:12, letterSpacing:1
+                }} onClick={importFromText}>
+                  ✅ RESTORE
+                </button>
+                <button className="btn-danger" style={{ flex:1 }} onClick={()=>setShowImportModal(false)}>CANCEL</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* App Info */}
         <div className="panel" style={{ padding:16, textAlign:'center' }}>
@@ -4000,7 +4424,7 @@ function CollectionScreen({ state, dispatch }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ANTI-TODO SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-function AntiTodoScreen({ state, dispatch, addXP, showNotif, sfx }) {
+function AntiTodoScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) {
   const [showAdd, setShowAdd] = useState(false);
   const [newItem, setNewItem] = useState({ name:'', reason:'', category:'habits', severity:'medium', customXp:50 });
   const antiTodo = state.antiTodo || [];
@@ -4030,8 +4454,10 @@ function AntiTodoScreen({ state, dispatch, addXP, showNotif, sfx }) {
 
   const broke = (item) => {
     dispatch({ type:'BREAK_ANTI_TODO', payload: item.id });
+    const xp = item.customXp || (SEVERITY.find(s=>s.k===item.severity)||SEVERITY[1]).xp;
+    applyPenalty(xp, `Broke anti-todo: ${item.name}`);
     sfx('broken');
-    showNotif(`💔 RESISTANCE BROKEN`);
+    showNotif(`💔 RESISTANCE BROKEN — PENALTY APPLIED`);
   };
 
   const catOf = (k) => CATEGORIES.find(c=>c.k===k) || CATEGORIES[5];
@@ -4203,9 +4629,171 @@ function AntiTodoScreen({ state, dispatch, addXP, showNotif, sfx }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // NAVIGATION
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// HEALTH SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
+function HealthScreen({ state, dispatch, showNotif }) {
+  const { hunter } = state;
+  const rank = hunter.rank || 'E';
+  const maxHp = hunter.maxHp || RANK_MAX_HP[rank] || 100;
+  const hp = hunter.hp ?? maxHp;
+  const hpPct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
+  const color = hpPct > 60 ? '#2ECC71' : hpPct > 30 ? '#F39C12' : '#E74C3C';
+  const isLow = hpPct <= 30;
+  const isCritical = hpPct <= 15;
+
+  const rankHpTable = [
+    { rank:'E',       max:100,   levels:'1–9' },
+    { rank:'D',       max:200,   levels:'10–24' },
+    { rank:'C',       max:400,   levels:'25–44' },
+    { rank:'B',       max:800,   levels:'45–69' },
+    { rank:'A',       max:1600,  levels:'70–99' },
+    { rank:'S',       max:3200,  levels:'100–199' },
+    { rank:'MONARCH', max:10000, levels:'200' },
+  ];
+
+  return (
+    <div style={{ height:'100%', display:'flex', flexDirection:'column' }}>
+      <div className="scrollable" style={{ flex:1, padding:'16px' }}>
+
+        {/* Header */}
+        <div className="cinzel" style={{ fontSize:18, color:'var(--crimson)', letterSpacing:3, marginBottom:20, textAlign:'center' }}>
+          ❤️ VITALITY STATUS
+        </div>
+
+        {/* Critical Warning */}
+        {isCritical && (
+          <div style={{
+            padding:'14px 16px', marginBottom:16, borderRadius:10,
+            background:'rgba(231,76,60,0.15)', border:'2px solid var(--crimson)',
+            boxShadow:'0 0 20px rgba(231,76,60,0.3)',
+            animation:'breathe 1s ease-in-out infinite'
+          }}>
+            <div className="cinzel" style={{ color:'var(--crimson)', fontSize:13, letterSpacing:2, textAlign:'center' }}>
+              ⚠️ CRITICAL — HP DANGEROUSLY LOW
+            </div>
+            <div style={{ color:'#E74C3Caa', fontSize:11, textAlign:'center', marginTop:6 }}>
+              Complete quests and habits to recover. If HP reaches 0 — ALL PROGRESS RESETS.
+            </div>
+          </div>
+        )}
+        {!isCritical && isLow && (
+          <div style={{
+            padding:'12px 16px', marginBottom:16, borderRadius:8,
+            background:'rgba(243,156,18,0.1)', border:'1px solid rgba(243,156,18,0.5)',
+          }}>
+            <div className="cinzel" style={{ color:'#F39C12', fontSize:12, letterSpacing:2, textAlign:'center' }}>
+              ⚠️ WARNING — LOW HP
+            </div>
+            <div style={{ color:'#F39C12aa', fontSize:11, textAlign:'center', marginTop:4 }}>
+              Failing tasks deals damage. Stay disciplined.
+            </div>
+          </div>
+        )}
+
+        {/* HP Bar */}
+        <div className="panel" style={{ padding:20, marginBottom:16, borderColor: isCritical ? 'var(--crimson)' : 'var(--border)' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:12 }}>
+            <div className="cinzel" style={{ fontSize:13, color:'var(--text-dim)', letterSpacing:2 }}>HIT POINTS</div>
+            <div className="cinzel" style={{ fontSize:24, color, fontWeight:900, textShadow:`0 0 15px ${color}` }}>
+              {Math.round(hp)} <span style={{ fontSize:14, color:'var(--text-dim)' }}>/ {maxHp}</span>
+            </div>
+          </div>
+          <div style={{ height:16, background:'rgba(255,255,255,0.06)', borderRadius:8, overflow:'hidden', position:'relative' }}>
+            <div style={{
+              height:'100%', width:`${hpPct}%`,
+              background:`linear-gradient(90deg, ${color}aa, ${color})`,
+              borderRadius:8, transition:'width 0.6s ease',
+              boxShadow:`0 0 12px ${color}88`,
+            }}/>
+            {isCritical && (
+              <div style={{ position:'absolute', inset:0, background:'rgba(231,76,60,0.15)', animation:'breathe 0.8s ease-in-out infinite' }}/>
+            )}
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', marginTop:8 }}>
+            <span style={{ fontSize:10, color:'var(--text-dim)' }}>0</span>
+            <span style={{ fontSize:10, color:hpPct>60?'var(--text-dim)':'var(--crimson)' }}>
+              {hpPct.toFixed(0)}% remaining
+            </span>
+            <span style={{ fontSize:10, color:'var(--text-dim)' }}>{maxHp}</span>
+          </div>
+        </div>
+
+        {/* Current Rank Info */}
+        <div className="panel" style={{ padding:16, marginBottom:16 }}>
+          <div className="cinzel" style={{ fontSize:11, color:'var(--text-dim)', letterSpacing:3, marginBottom:14 }}>CURRENT RANK</div>
+          <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+            <div style={{
+              width:56, height:56, borderRadius:12, display:'flex', alignItems:'center', justifyContent:'center',
+              background:`rgba(${rank==='MONARCH'?'255,215,0':rank==='S'?'231,76,60':rank==='A'?'243,156,18':rank==='B'?'155,89,182':rank==='C'?'79,195,247':rank==='D'?'46,204,113':'106,122,154'},0.15)`,
+              border:`2px solid ${RANK_COLORS[rank]}`,
+              boxShadow:`0 0 20px ${RANK_COLORS[rank]}44`,
+            }}>
+              <span className="cinzel" style={{ fontSize:18, color:RANK_COLORS[rank], fontWeight:900 }}>{rank==='MONARCH'?'♛':rank}</span>
+            </div>
+            <div>
+              <div className="cinzel" style={{ fontSize:16, color:RANK_COLORS[rank] }}>{rank}-RANK</div>
+              <div style={{ fontSize:12, color:'var(--text-dim)', marginTop:4 }}>Max HP: {maxHp.toLocaleString()}</div>
+              <div style={{ fontSize:12, color:'var(--text-dim)' }}>Level {hunter.level}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Penalty Info */}
+        <div className="panel" style={{ padding:16, marginBottom:16, borderColor:'rgba(231,76,60,0.3)' }}>
+          <div className="cinzel" style={{ fontSize:11, color:'var(--text-dim)', letterSpacing:3, marginBottom:12 }}>⚠️ PENALTY SYSTEM</div>
+          <div style={{ fontSize:12, color:'var(--text)', lineHeight:1.8 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+              <span style={{ color:'var(--text-dim)' }}>Quest / Habit fail</span>
+              <span style={{ color:'var(--crimson)' }}>−0.5× task XP</span>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+              <span style={{ color:'var(--text-dim)' }}>HP loss formula</span>
+              <span style={{ color:'var(--crimson)' }}>−5 HP per 3,000 XP</span>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+              <span style={{ color:'var(--text-dim)' }}>Anti-todo broken</span>
+              <span style={{ color:'var(--crimson)' }}>−0.5× + HP damage</span>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between', padding:'6px 0' }}>
+              <span style={{ color:'var(--text-dim)' }}>HP reaches 0</span>
+              <span style={{ color:'var(--crimson)', fontWeight:900 }}>☠️ ALL PROGRESS RESET</span>
+            </div>
+          </div>
+        </div>
+
+        {/* HP by Rank table */}
+        <div className="panel" style={{ padding:16, marginBottom:16 }}>
+          <div className="cinzel" style={{ fontSize:11, color:'var(--text-dim)', letterSpacing:3, marginBottom:12 }}>HP BY RANK</div>
+          {rankHpTable.map(r => (
+            <div key={r.rank} style={{
+              display:'flex', justifyContent:'space-between', alignItems:'center',
+              padding:'8px 10px', marginBottom:6, borderRadius:6,
+              background: r.rank===rank ? `rgba(${rank==='MONARCH'?'255,215,0':'79,195,247'},0.08)` : 'rgba(255,255,255,0.02)',
+              border: r.rank===rank ? `1px solid ${RANK_COLORS[r.rank]}44` : '1px solid transparent',
+            }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <span className="cinzel" style={{ fontSize:12, color:RANK_COLORS[r.rank], minWidth:60 }}>
+                  {r.rank==='MONARCH'?'♛ MONARCH':`${r.rank}-RANK`}
+                </span>
+                <span style={{ fontSize:10, color:'var(--text-dim)' }}>Lv {r.levels}</span>
+              </div>
+              <span className="cinzel" style={{ fontSize:13, color: r.rank===rank ? RANK_COLORS[r.rank] : 'var(--text-dim)' }}>
+                {r.max.toLocaleString()} HP
+              </span>
+            </div>
+          ))}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 const NAV_TABS = [
   { id:'status',     label:'STATUS',     icon: Home },
   { id:'quests',     label:'QUESTS',     icon: Sword },
+  { id:'health',     label:'HEALTH',     icon: Activity },
   { id:'body',       label:'BODY',       icon: Dumbbell },
   { id:'mind',       label:'MIND',       icon: Brain },
   { id:'habits',     label:'HABITS',     icon: Flame },
@@ -4287,14 +4875,21 @@ export default function App() {
   const soundEnabled = state.soundEnabled !== false; // default true
 
   const addXP = useCallback((amount, source) => {
+    // Calculate what the boosted amount will be for the float display
+    const hunter = state.hunter;
+    let mult = 1;
+    if (hunter.boostMult && hunter.boostMult > 1) {
+      if (!hunter.boostEnd || Date.now() <= hunter.boostEnd) mult = hunter.boostMult;
+    }
+    const displayAmount = Math.round(amount * mult);
     dispatch({ type:'GAIN_XP', payload: amount });
     playSound('xpGain', soundEnabled);
     const id = Date.now() + Math.random();
     const x = Math.random() * 200 + 80;
     const y = Math.random() * 200 + 150;
-    setFloats(f => [...f, { id, amount, x, y }]);
+    setFloats(f => [...f, { id, amount: displayAmount, x, y, boosted: mult > 1 }]);
     setTimeout(() => setFloats(f => f.filter(fl => fl.id !== id)), 1600);
-  }, [soundEnabled]);
+  }, [soundEnabled, state.hunter]);
 
   // Detect level up
   useEffect(() => {
@@ -4303,6 +4898,32 @@ export default function App() {
       playSound('levelUp', soundEnabled);
     }
   }, [state._leveled]);
+
+  const [penaltyData, setPenaltyData] = useState(null);
+  const [showDeath, setShowDeath] = useState(false);
+
+  // Detect penalty
+  useEffect(() => {
+    if (state._penaltyData) {
+      setPenaltyData(state._penaltyData);
+      playSound('broken', soundEnabled);
+      if (state._penaltyData.isDead) {
+        setTimeout(() => { setPenaltyData(null); setShowDeath(true); }, 1200);
+      }
+      dispatch({ type:'CLEAR_PENALTY' });
+    }
+  }, [state._penaltyData]);
+
+  const applyPenalty = useCallback((xp, reason) => {
+    dispatch({ type:'APPLY_PENALTY', payload:{ xp, reason } });
+  }, []);
+
+  const handleDeath = async () => {
+    playSound('reset', soundEnabled);
+    dispatch({ type:'RESET_ALL' });
+    try { await clearState(); } catch(e) {}
+    setShowDeath(false);
+  };
 
   const showNotif = useCallback((msg) => {
     setNotif(msg);
@@ -4338,7 +4959,7 @@ export default function App() {
     );
   }
 
-  const screenProps = { state, dispatch, addXP, showNotif, sfx };
+  const screenProps = { state, dispatch, addXP, showNotif, sfx, applyPenalty };
 
   return (
     <>
@@ -4388,6 +5009,7 @@ export default function App() {
         <div style={{ flex:1, overflow:'hidden', position:'relative', zIndex:1 }}>
           {tab==='status'   && <StatusScreen {...screenProps}/>}
           {tab==='quests'   && <QuestsScreen {...screenProps}/>}
+          {tab==='health'   && <HealthScreen {...screenProps}/>}
           {tab==='body'     && <BodyScreen {...screenProps}/>}
           {tab==='mind'     && <MindScreen {...screenProps}/>}
           {tab==='habits'   && <HabitsScreen {...screenProps}/>}
@@ -4427,6 +5049,79 @@ export default function App() {
 
       {/* Level Up */}
       {levelUpData && <LevelUpOverlay data={levelUpData} onClose={()=>setLevelUpData(null)}/>}
+
+      {/* Penalty Flash */}
+      {penaltyData && !penaltyData.isDead && (
+        <div onClick={()=>setPenaltyData(null)} style={{
+          position:'fixed', inset:0, zIndex:900,
+          background:'rgba(231,76,60,0.12)',
+          display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+          backdropFilter:'blur(3px)', cursor:'pointer', animation:'levelUpFlash 0.5s ease-out',
+        }}>
+          <div className="cinzel" style={{ fontSize:13, color:'#E74C3C88', letterSpacing:6, marginBottom:12 }}>PENALTY</div>
+          <div style={{ fontSize:56, fontWeight:900, color:'var(--crimson)', textShadow:'0 0 30px #E74C3C', lineHeight:1 }}>
+            ⚠️
+          </div>
+          <div style={{ marginTop:16, display:'flex', gap:24 }}>
+            <div style={{ textAlign:'center' }}>
+              <div className="cinzel" style={{ fontSize:22, color:'var(--crimson)', fontWeight:900 }}>−{penaltyData.xpLost} XP</div>
+              <div style={{ fontSize:10, color:'#E74C3C88', letterSpacing:2, marginTop:4 }}>XP DEDUCTED</div>
+            </div>
+            <div style={{ textAlign:'center' }}>
+              <div className="cinzel" style={{ fontSize:22, color:'var(--crimson)', fontWeight:900 }}>−{penaltyData.hpLost} HP</div>
+              <div style={{ fontSize:10, color:'#E74C3C88', letterSpacing:2, marginTop:4 }}>HP LOST</div>
+            </div>
+          </div>
+          <div style={{ marginTop:24, padding:'8px 16px', borderRadius:6, background:'rgba(231,76,60,0.1)', border:'1px solid rgba(231,76,60,0.3)' }}>
+            <div style={{ fontSize:11, color:'var(--crimson)', textAlign:'center' }}>
+              Current HP: {Math.max(0, Math.round(state.hunter.hp || 0))} / {state.hunter.maxHp || 100}
+            </div>
+          </div>
+          <div style={{ marginTop:16, fontSize:10, color:'#6a7a9a', letterSpacing:2 }}>TAP TO DISMISS</div>
+        </div>
+      )}
+
+      {/* Death Screen */}
+      {showDeath && (
+        <div style={{
+          position:'fixed', inset:0, zIndex:1000,
+          background:'rgba(0,0,0,0.98)',
+          display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+          backdropFilter:'blur(8px)',
+        }}>
+          {[...Array(20)].map((_,i) => (
+            <div key={i} style={{
+              position:'absolute',
+              left:`${Math.random()*100}%`, top:`${Math.random()*100}%`,
+              width:3, height:3, background:'#E74C3C', borderRadius:'50%',
+              animation:`particle ${1+Math.random()*2}s ease-out ${Math.random()*0.5}s forwards`,
+              '--dx':`${(Math.random()-0.5)*300}px`, '--dy':`${(Math.random()-0.5)*300}px`
+            }}/>
+          ))}
+          <div className="cinzel" style={{ textAlign:'center', padding:'0 32px' }}>
+            <div style={{ fontSize:13, color:'#E74C3C44', letterSpacing:8, marginBottom:20 }}>SYSTEM MESSAGE</div>
+            <div style={{ fontSize:72, marginBottom:8 }}>☠️</div>
+            <div style={{ fontSize:48, fontWeight:900, color:'var(--crimson)',
+              textShadow:'0 0 30px #E74C3C, 0 0 60px #E74C3C', lineHeight:1, marginBottom:12 }}>
+              YOU DIED
+            </div>
+            <div style={{ fontSize:16, color:'#fff', marginBottom:8 }}>HP reached 0</div>
+            <div style={{ fontSize:13, color:'#E74C3C88', marginBottom:32, lineHeight:1.8 }}>
+              The Shadow System has judged you.<br/>
+              All progress has been erased.<br/>
+              Rise again — if you dare.
+            </div>
+            <button onClick={handleDeath} style={{
+              padding:'16px 40px', borderRadius:8, cursor:'pointer',
+              background:'rgba(231,76,60,0.15)', border:'2px solid var(--crimson)',
+              color:'var(--crimson)', fontFamily:'Cinzel,serif', fontSize:14,
+              letterSpacing:3, boxShadow:'0 0 20px rgba(231,76,60,0.3)'
+            }}>
+              ⚔️ RISE AGAIN
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Reset Modal */}
       {showReset && <ResetModal onConfirm={handleReset} onCancel={()=>setShowReset(false)}/>}

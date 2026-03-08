@@ -347,6 +347,25 @@ const STAT_COLORS = {
   vitality:'#2ECC71', focus:'#F39C12', charisma:'#FF69B4'
 };
 const STAT_LABELS = { strength:'STR', intelligence:'INT', discipline:'DIS', vitality:'VIT', focus:'FOC', charisma:'CHA' };
+const DEFAULT_CUSTOM_STATS = [
+  { key:'strength',     label:'Strength',     abbr:'STR', color:'#E74C3C', icon:'⚔️' },
+  { key:'intelligence', label:'Intelligence', abbr:'INT', color:'#4FC3F7', icon:'📚' },
+  { key:'discipline',   label:'Discipline',   abbr:'DIS', color:'#9B59B6', icon:'🎯' },
+  { key:'vitality',     label:'Vitality',     abbr:'VIT', color:'#2ECC71', icon:'❤️' },
+  { key:'focus',        label:'Focus',        abbr:'FOC', color:'#F39C12', icon:'⚡' },
+  { key:'charisma',     label:'Charisma',     abbr:'CHA', color:'#FF69B4', icon:'🌟' },
+];
+function getStatDefs(state) {
+  return (state.customStats && state.customStats.length > 0) ? state.customStats : DEFAULT_CUSTOM_STATS;
+}
+function getStatColor(key, defs) {
+  const d = (defs||DEFAULT_CUSTOM_STATS).find(s => s.key === key);
+  return d ? d.color : (STAT_COLORS[key] || 'var(--mana)');
+}
+function getStatAbbr(key, defs) {
+  const d = (defs||DEFAULT_CUSTOM_STATS).find(s => s.key === key);
+  return d ? d.abbr : (STAT_LABELS[key] || key.slice(0,3).toUpperCase());
+}
 const CLASS_INFO = {
   warrior:{ icon:'⚔️', label:'Warrior', desc:'Physical focus — gym, sports', bonus:'strength' },
   mage:{ icon:'📚', label:'Mage', desc:'Intellectual focus — studies, reading', bonus:'intelligence' },
@@ -507,6 +526,7 @@ function todayStr() { return new Date().toISOString().slice(0,10); }
 const buildInitialState = () => ({
   hunter: { name:"", class:"", rank:"E", level:1, totalXP:0, xpToNextLevel:1000, title:"The Weakest", createdAt:null, coins:0, equippedTitle:null, equippedBadge:null, boostMult:1, boostEnd:null, hp:100, maxHp:100 },
   stats: { strength:1, intelligence:1, discipline:1, vitality:1, focus:1, charisma:1 },
+  customStats: DEFAULT_CUSTOM_STATS,
   muscles: {
     chest:{level:0,xp:0,trained:0}, frontDelts:{level:0,xp:0,trained:0}, sideDelts:{level:0,xp:0,trained:0},
     rearDelts:{level:0,xp:0,trained:0}, biceps:{level:0,xp:0,trained:0}, triceps:{level:0,xp:0,trained:0},
@@ -903,6 +923,9 @@ function reducer(state, action) {
     }
     case 'SET_BG_MUSIC': {
       return { ...state, bgMusic: { ...(state.bgMusic||{}), ...action.payload } };
+    }
+    case 'UPDATE_CUSTOM_STATS': {
+      return { ...state, customStats: action.payload };
     }
     case 'UPDATE_ASSESSMENT_ANSWERS': {
       return { ...state, assessmentAnswers: { ...(state.assessmentAnswers||{}), ...action.payload } };
@@ -1529,17 +1552,13 @@ function Onboarding({ onComplete }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // STATUS SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-function RadarChart({ stats }) {
-  const CX = 110, CY = 110, R = 82;
-  const ATTRS = [
-    { key:'strength',     abbr:'STR', color:'#E74C3C' },
-    { key:'intelligence', abbr:'INT', color:'#4FC3F7' },
-    { key:'discipline',   abbr:'DIS', color:'#9B59B6' },
-    { key:'vitality',     abbr:'VIT', color:'#2ECC71' },
-    { key:'focus',        abbr:'FOC', color:'#F39C12' },
-    { key:'charisma',     abbr:'CHA', color:'#FF69B4' },
-  ];
+function RadarChart({ stats, statDefs }) {
+  const ATTRS = (statDefs && statDefs.length > 0 ? statDefs : DEFAULT_CUSTOM_STATS).map(s => ({
+    key: s.key, abbr: s.abbr, color: s.color
+  }));
   const N = ATTRS.length;
+  // Adaptive sizing based on number of stats
+  const CX = 110, CY = 110, R = N <= 6 ? 82 : N <= 8 ? 75 : 68;
   const scale = v => Math.min(1, (v || 0) / 100);
   const pt = (i, r) => {
     const angle = (Math.PI * 2 * i / N) - Math.PI / 2;
@@ -1592,6 +1611,7 @@ function RadarChart({ stats }) {
 
 function StatusScreen({ state, dispatch, addXP }) {
   const { hunter, stats, quests, habits } = state;
+  const statDefs = getStatDefs(state);
   const today = todayStr();
   const dailyDone = quests.daily.filter(q=>q.completed && q.date===today).length;
   const totalDaily = quests.daily.length;
@@ -1681,7 +1701,7 @@ function StatusScreen({ state, dispatch, addXP }) {
       {/* Stats Radar Chart */}
       <div className="panel" style={{ padding:16, flexShrink:0 }}>
         <div className="cinzel" style={{ fontSize:12, color:'var(--text-dim)', letterSpacing:3, marginBottom:14 }}>CORE ATTRIBUTES</div>
-        <RadarChart stats={stats}/>
+        <RadarChart stats={stats} statDefs={statDefs}/>
       </div>
 
       {/* XP Boost Panel */}
@@ -1865,6 +1885,7 @@ function StatusScreen({ state, dispatch, addXP }) {
 // QUESTS SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) {
+  const statDefs = getStatDefs(state);
   const [tab, setTab] = useState('daily');
   const [showAddMain, setShowAddMain] = useState(false);
   const [showAddDaily, setShowAddDaily] = useState(false);
@@ -1914,12 +1935,7 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
 
   const STAT_OPTIONS = [
     { value:'', label:'None' },
-    { value:'strength', label:'⚔️ Strength' },
-    { value:'intelligence', label:'📚 Intelligence' },
-    { value:'discipline', label:'🎯 Discipline' },
-    { value:'vitality', label:'❤️ Vitality' },
-    { value:'focus', label:'⚡ Focus' },
-    { value:'charisma', label:'🌟 Charisma' },
+    ...getStatDefs(state).map(s => ({ value: s.key, label: `${s.icon} ${s.label}` }))
   ];
 
   const customRewards = state.customRewards || [];
@@ -2072,8 +2088,8 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
                     {q.desc && <div style={{ fontSize:11, color:'var(--text-dim)', marginTop:2 }}>{q.desc}</div>}
                     <div style={{ display:'flex', gap:5, marginTop:4, flexWrap:'wrap' }}>
                       {(q.statRewards||[]).filter(s=>s.stat).map((s,i)=>(
-                        <span key={i} style={{ fontSize:9, color:STAT_COLORS[s.stat]||'var(--mana)', border:`1px solid ${STAT_COLORS[s.stat]||'var(--mana)'}44`, borderRadius:3, padding:'1px 5px', letterSpacing:1 }}>
-                          +{s.amount} {STAT_LABELS[s.stat]||s.stat.slice(0,3).toUpperCase()}
+                        <span key={i} style={{ fontSize:9, color:getStatColor(s.stat,statDefs), border:`1px solid ${getStatColor(s.stat,statDefs)}44`, borderRadius:3, padding:'1px 5px', letterSpacing:1 }}>
+                          +{s.amount} {getStatAbbr(s.stat,statDefs)}
                         </span>
                       ))}
                     </div>
@@ -2133,12 +2149,7 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
                 <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>STAT BOOST</label>
                 <select className="input-dark" value={newQuest.statReward} onChange={e=>setNewQuest(p=>({...p,statReward:e.target.value}))}>
                   <option value="">None</option>
-                  <option value="strength">⚔️ Strength</option>
-                  <option value="intelligence">📚 Intelligence</option>
-                  <option value="discipline">🎯 Discipline</option>
-                  <option value="vitality">❤️ Vitality</option>
-                  <option value="focus">⚡ Focus</option>
-                  <option value="charisma">🌟 Charisma</option>
+                  {getStatDefs(state).map(s=><option key={s.key} value={s.key}>{s.icon} {s.label}</option>)}
                 </select>
               </div>
             </div>
@@ -2246,12 +2257,7 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
                     setNewSideQuest(p=>({...p,statRewards:updated}));
                   }} style={{ flex:2 }}>
                     <option value="">None</option>
-                    <option value="strength">⚔️ Strength</option>
-                    <option value="intelligence">📚 Intelligence</option>
-                    <option value="discipline">🎯 Discipline</option>
-                    <option value="vitality">❤️ Vitality</option>
-                    <option value="focus">⚡ Focus</option>
-                    <option value="charisma">🌟 Charisma</option>
+                    {getStatDefs(state).map(s=><option key={s.key} value={s.key}>{s.icon} {s.label}</option>)}
                   </select>
                   {sr.stat && (
                     <input type="number" className="input-dark" min={1} max={50} value={sr.amount}
@@ -2274,8 +2280,8 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
               <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
                 <span className="cinzel" style={{ fontSize:11, color:'var(--gold)' }}>+{newSideQuest.xp} XP</span>
                 {newSideQuest.statRewards.filter(s=>s.stat).map((s,i)=>(
-                  <span key={i} style={{ fontSize:10, color:STAT_COLORS[s.stat]||'var(--mana)', border:`1px solid ${STAT_COLORS[s.stat]||'var(--mana)'}44`, borderRadius:3, padding:'1px 6px' }}>
-                    +{s.amount} {STAT_LABELS[s.stat]||s.stat.slice(0,3).toUpperCase()}
+                  <span key={i} style={{ fontSize:10, color:getStatColor(s.stat,statDefs), border:`1px solid ${getStatColor(s.stat,statDefs)}44`, borderRadius:3, padding:'1px 6px' }}>
+                    +{s.amount} {getStatAbbr(s.stat,statDefs)}
                   </span>
                 ))}
               </div>
@@ -2332,8 +2338,8 @@ function QuestCard({ quest, completed, onComplete, onDelete, onFail, color, show
           {/* Rewards row */}
           <div style={{ display:'flex', gap:6, marginTop:4, flexWrap:'wrap' }}>
             {quest.statReward && (
-              <span style={{ fontSize:9, color:STAT_COLORS[quest.statReward]||'var(--mana)', border:`1px solid ${STAT_COLORS[quest.statReward]||'var(--mana)'}44`, borderRadius:3, padding:'1px 5px', letterSpacing:1 }}>
-                +{quest.statAmount||1} {STAT_LABELS[quest.statReward]||quest.statReward.toUpperCase().slice(0,3)}
+              <span style={{ fontSize:9, color:getStatColor(quest.statReward,statDefs), border:`1px solid ${getStatColor(quest.statReward,statDefs)}44`, borderRadius:3, padding:'1px 5px', letterSpacing:1 }}>
+                +{quest.statAmount||1} {getStatAbbr(quest.statReward,statDefs)}
               </span>
             )}
             {linkedReward && (
@@ -3769,7 +3775,9 @@ function BossScreen({ state, dispatch, addXP, showNotif, sfx }) {
 
   const attackBoss = (boss) => {
     const { stats } = state;
-    const baseDmg = Math.floor((stats.strength + stats.discipline + stats.focus) * (Math.random() * 0.5 + 0.75));
+    const activeDefs = getStatDefs(state);
+    const totalPower = activeDefs.reduce((sum, s) => sum + (stats[s.key]||1), 0);
+    const baseDmg = Math.floor((totalPower / activeDefs.length * 3) * (Math.random() * 0.5 + 0.75));
     const isCrit = Math.random() < 0.15;
     const damage = isCrit ? baseDmg * 3 : baseDmg;
 
@@ -3989,14 +3997,8 @@ function RankCardModal({ state, onClose }) {
     ctx.fillText(`Lv. ${hunter.level}`, 32, 188);
 
     // Stats row
-    const statList = [
-      ['STR', stats.strength, '#E74C3C'],
-      ['INT', stats.intelligence, '#4FC3F7'],
-      ['DIS', stats.discipline, '#9B59B6'],
-      ['VIT', stats.vitality, '#2ECC71'],
-      ['FOC', stats.focus, '#F39C12'],
-      ['CHA', stats.charisma, '#FF69B4'],
-    ];
+    const bossStatDefs = getStatDefs(state);
+    const statList = bossStatDefs.map(s => [s.abbr, stats[s.key]||0, s.color]);
     ctx.font = 'bold 13px Courier New, monospace';
     ctx.textAlign = 'left';
     statList.forEach(([label, val, color], i) => {
@@ -4172,6 +4174,183 @@ function WorkoutAssistant({ muscleName, muscleData, onClose, onLogWorkout }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SETTINGS SCREEN — Theme, Notifications, Export, Data
+// ─────────────────────────────────────────────────────────────────────────────
+// MANAGE STATS PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+function ManageStatsPanel({ state, dispatch, showNotif }) {
+  const statDefs = getStatDefs(state);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [newStat, setNewStat] = useState({ label:'', abbr:'', color:'#4FC3F7', icon:'⭐' });
+  const [editStat, setEditStat] = useState(null);
+
+  const PRESET_COLORS = [
+    '#E74C3C','#4FC3F7','#9B59B6','#2ECC71','#F39C12','#FF69B4',
+    '#E67E22','#1ABC9C','#3498DB','#F39C12','#E91E63','#00BCD4',
+    '#8BC34A','#FF5722','#607D8B','#795548'
+  ];
+
+  const addStat = () => {
+    if (!newStat.label.trim()) return;
+    const key = newStat.label.toLowerCase().replace(/[^a-z0-9]/g,'_') + '_' + Date.now();
+    const abbr = newStat.abbr.trim() || newStat.label.slice(0,3).toUpperCase();
+    const updated = [...statDefs, { key, label:newStat.label.trim(), abbr:abbr.slice(0,5).toUpperCase(), color:newStat.color, icon:newStat.icon||'⭐' }];
+    dispatch({ type:'UPDATE_CUSTOM_STATS', payload: updated });
+    setNewStat({ label:'', abbr:'', color:'#4FC3F7', icon:'⭐' });
+    setShowAdd(false);
+    showNotif('✨ STAT UNLOCKED');
+  };
+
+  const deleteStat = (idx) => {
+    if (statDefs.length <= 1) { showNotif('⚠️ Need at least 1 stat'); return; }
+    const updated = statDefs.filter((_,i) => i !== idx);
+    dispatch({ type:'UPDATE_CUSTOM_STATS', payload: updated });
+    showNotif('🗑 STAT REMOVED');
+  };
+
+  const saveStat = (idx) => {
+    if (!editStat.label.trim()) return;
+    const abbr = editStat.abbr.trim() || editStat.label.slice(0,3).toUpperCase();
+    const updated = statDefs.map((s,i) => i===idx ? { ...editStat, abbr:abbr.slice(0,5).toUpperCase() } : s);
+    dispatch({ type:'UPDATE_CUSTOM_STATS', payload: updated });
+    setEditingIdx(null);
+    showNotif('✏️ STAT UPDATED');
+  };
+
+  const moveUp = (idx) => {
+    if (idx === 0) return;
+    const updated = [...statDefs];
+    [updated[idx-1], updated[idx]] = [updated[idx], updated[idx-1]];
+    dispatch({ type:'UPDATE_CUSTOM_STATS', payload: updated });
+  };
+
+  const moveDown = (idx) => {
+    if (idx === statDefs.length - 1) return;
+    const updated = [...statDefs];
+    [updated[idx], updated[idx+1]] = [updated[idx+1], updated[idx]];
+    dispatch({ type:'UPDATE_CUSTOM_STATS', payload: updated });
+  };
+
+  const btnStyle = (bg, border, color) => ({
+    padding:'5px 10px', borderRadius:5, cursor:'pointer',
+    background:bg, border:`1px solid ${border}`, color, fontSize:10,
+    fontFamily:'Cinzel,serif', letterSpacing:1
+  });
+
+  const ColorPicker = ({ value, onChange }) => (
+    <div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:6 }}>
+        {PRESET_COLORS.map(c => (
+          <div key={c} onClick={()=>onChange(c)} style={{
+            width:22, height:22, borderRadius:'50%', background:c, cursor:'pointer',
+            border: value===c ? '2px solid white' : '2px solid transparent',
+            boxShadow: value===c ? `0 0 6px ${c}` : 'none'
+          }}/>
+        ))}
+      </div>
+      <input type="color" value={value} onChange={e=>onChange(e.target.value)}
+        style={{ width:'100%', height:28, borderRadius:4, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', cursor:'pointer' }}/>
+    </div>
+  );
+
+  return (
+    <div className="panel" style={{ padding:16, marginBottom:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+        <div className="cinzel" style={{ fontSize:12, color:'var(--mana)', letterSpacing:2 }}>📊 MANAGE STATS / SKILLS</div>
+        <button onClick={()=>{ setShowAdd(p=>!p); setEditingIdx(null); }}
+          style={btnStyle('rgba(79,195,247,0.1)','var(--mana)','var(--mana)')}>
+          {showAdd ? '✕ CANCEL' : '+ ADD STAT'}
+        </button>
+      </div>
+
+      {/* Add new stat form */}
+      {showAdd && (
+        <div style={{ background:'rgba(79,195,247,0.05)', border:'1px solid rgba(79,195,247,0.15)', borderRadius:8, padding:14, marginBottom:14 }}>
+          <div className="cinzel" style={{ fontSize:10, color:'var(--mana)', letterSpacing:2, marginBottom:10 }}>NEW STAT</div>
+          <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+            <input className="input-dark" value={newStat.icon} onChange={e=>setNewStat(p=>({...p,icon:e.target.value}))}
+              placeholder="icon" style={{ width:52, textAlign:'center', fontSize:16 }}/>
+            <input className="input-dark" value={newStat.label} onChange={e=>setNewStat(p=>({...p,label:e.target.value}))}
+              placeholder="Stat name (e.g. Creativity)" style={{ flex:2 }}/>
+            <input className="input-dark" value={newStat.abbr} onChange={e=>setNewStat(p=>({...p,abbr:e.target.value.toUpperCase().slice(0,5)}))}
+              placeholder="ABR" style={{ width:60, textAlign:'center', fontFamily:'monospace', fontWeight:700 }}/>
+          </div>
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:10, color:'var(--text-dim)', marginBottom:6 }}>COLOR</div>
+            <ColorPicker value={newStat.color} onChange={c=>setNewStat(p=>({...p,color:c}))}/>
+          </div>
+          <div style={{ display:'flex', gap:8, alignItems:'center', marginTop:4 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:6, flex:1 }}>
+              <div style={{ width:10, height:10, borderRadius:'50%', background:newStat.color }}/>
+              <span style={{ fontSize:11, color:newStat.color, fontFamily:'Cinzel,serif' }}>
+                {newStat.icon||'⭐'} {newStat.label||'Stat Name'} [{newStat.abbr||'???'}]
+              </span>
+            </div>
+            <button onClick={addStat} style={btnStyle('rgba(46,204,113,0.15)','var(--success)','var(--success)')}>
+              ✅ ADD
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Existing stats list */}
+      <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+        {statDefs.map((s, idx) => (
+          <div key={s.key}>
+            {editingIdx === idx ? (
+              /* Edit form */
+              <div style={{ background:`${s.color}11`, border:`1px solid ${s.color}44`, borderRadius:8, padding:12 }}>
+                <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+                  <input className="input-dark" value={editStat.icon} onChange={e=>setEditStat(p=>({...p,icon:e.target.value}))}
+                    placeholder="icon" style={{ width:52, textAlign:'center', fontSize:16 }}/>
+                  <input className="input-dark" value={editStat.label} onChange={e=>setEditStat(p=>({...p,label:e.target.value}))}
+                    placeholder="Stat name" style={{ flex:2 }}/>
+                  <input className="input-dark" value={editStat.abbr} onChange={e=>setEditStat(p=>({...p,abbr:e.target.value.toUpperCase().slice(0,5)}))}
+                    placeholder="ABR" style={{ width:60, textAlign:'center', fontFamily:'monospace', fontWeight:700 }}/>
+                </div>
+                <div style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:10, color:'var(--text-dim)', marginBottom:6 }}>COLOR</div>
+                  <ColorPicker value={editStat.color} onChange={c=>setEditStat(p=>({...p,color:c}))}/>
+                </div>
+                <div style={{ display:'flex', gap:8 }}>
+                  <button onClick={()=>saveStat(idx)} style={{ ...btnStyle('rgba(46,204,113,0.15)','var(--success)','var(--success)'), flex:1 }}>✅ SAVE</button>
+                  <button onClick={()=>setEditingIdx(null)} style={{ ...btnStyle('rgba(231,76,60,0.1)','rgba(231,76,60,0.4)','#E74C3C'), flex:1 }}>✕ CANCEL</button>
+                </div>
+              </div>
+            ) : (
+              /* Display row */
+              <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:7, background:`${s.color}0d`, border:`1px solid ${s.color}22` }}>
+                <div style={{ width:8, height:8, borderRadius:'50%', background:s.color, flexShrink:0 }}/>
+                <span style={{ fontSize:14 }}>{s.icon}</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <span style={{ color:s.color, fontFamily:'Cinzel,serif', fontSize:11, fontWeight:700 }}>{s.label}</span>
+                  <span style={{ color:'var(--text-dim)', fontSize:10, marginLeft:6 }}>[{s.abbr}]</span>
+                </div>
+                <span style={{ color:s.color, fontFamily:'Courier New,monospace', fontSize:13, fontWeight:700, minWidth:28, textAlign:'right' }}>
+                  {state.stats[s.key]||0}
+                </span>
+                <div style={{ display:'flex', gap:4, marginLeft:4 }}>
+                  <button onClick={()=>moveUp(idx)} disabled={idx===0}
+                    style={{ padding:'3px 6px', borderRadius:4, cursor:'pointer', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color:idx===0?'rgba(255,255,255,0.2)':'var(--text)', fontSize:10 }}>▲</button>
+                  <button onClick={()=>moveDown(idx)} disabled={idx===statDefs.length-1}
+                    style={{ padding:'3px 6px', borderRadius:4, cursor:'pointer', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color:idx===statDefs.length-1?'rgba(255,255,255,0.2)':'var(--text)', fontSize:10 }}>▼</button>
+                  <button onClick={()=>{ setEditingIdx(idx); setEditStat({...s}); setShowAdd(false); }}
+                    style={{ padding:'3px 7px', borderRadius:4, cursor:'pointer', background:'rgba(79,195,247,0.1)', border:'1px solid rgba(79,195,247,0.25)', color:'var(--mana)', fontSize:10 }}>✏️</button>
+                  <button onClick={()=>deleteStat(idx)}
+                    style={{ padding:'3px 7px', borderRadius:4, cursor:'pointer', background:'rgba(231,76,60,0.08)', border:'1px solid rgba(231,76,60,0.25)', color:'#E74C3C', fontSize:10 }}>🗑</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize:10, color:'var(--text-dim)', marginTop:10, textAlign:'center' }}>
+        Stats are tracked on your radar chart and awarded by quests & activities
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 // BACKGROUND MUSIC SETTINGS PANEL
@@ -4714,6 +4893,9 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
             </div>
           </div>
         )}
+
+        {/* Manage Stats */}
+        <ManageStatsPanel state={state} dispatch={dispatch} showNotif={showNotif}/>
 
         {/* Background Music */}
         <BgMusicSettingsPanel state={state} dispatch={dispatch} showNotif={showNotif}/>

@@ -527,6 +527,8 @@ const buildInitialState = () => ({
   hunter: { name:"", class:"", rank:"E", level:1, totalXP:0, xpToNextLevel:1000, title:"The Weakest", createdAt:null, coins:0, equippedTitle:null, equippedBadge:null, boostMult:1, boostEnd:null, hp:100, maxHp:100 },
   stats: { strength:1, intelligence:1, discipline:1, vitality:1, focus:1, charisma:1 },
   customStats: DEFAULT_CUSTOM_STATS,
+  personalQuotes: [],
+  morningCheckin: { lastShownDate: '', pendingQuests: [] },
   muscles: {
     chest:{level:0,xp:0,trained:0}, frontDelts:{level:0,xp:0,trained:0}, sideDelts:{level:0,xp:0,trained:0},
     rearDelts:{level:0,xp:0,trained:0}, biceps:{level:0,xp:0,trained:0}, triceps:{level:0,xp:0,trained:0},
@@ -918,14 +920,52 @@ function reducer(state, action) {
     }
     case 'RESET_DAILY': {
       const today = todayStr();
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const checkin = state.morningCheckin || { lastShownDate: '', pendingQuests: [] };
+      // Only snapshot on a real day-change (not if we already reset today)
+      const isNewDay = (state.lastResetDate || '') !== today;
+      const pendingQuests = isNewDay
+        ? state.quests.daily.filter(q => !(q.completed && (q.date === yesterday || q.date === today))).map(q => ({ id:q.id, name:q.name, xp:q.xp, category:q.category||'', statReward:q.statReward||'', statAmount:q.statAmount||1, rewardId:q.rewardId||'' }))
+        : checkin.pendingQuests;
       const daily = state.quests.daily.map(q => ({...q, completed: q.date===today ? q.completed : false, date: q.date===today ? q.date : ''}));
-      return { ...state, quests:{ ...state.quests, daily } };
+      return {
+        ...state,
+        quests: { ...state.quests, daily },
+        lastResetDate: today,
+        morningCheckin: { ...checkin, pendingQuests }
+      };
+    }
+    case 'COMPLETE_QUEST_RETROACTIVE': {
+      // Award XP + stats for a quest completed yesterday (grace check-in)
+      const { id } = action.payload;
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const quest = state.quests.daily.find(q => q.id === id);
+      // Mark complete with yesterday's date so it shows as done
+      const daily = state.quests.daily.map(q => q.id === id ? { ...q, completed: true, date: yesterday } : q);
+      let newState = { ...state, quests: { ...state.quests, daily } };
+      if (quest?.statReward && quest.statAmount) {
+        newState = { ...newState, stats: { ...newState.stats, [quest.statReward]: (newState.stats[quest.statReward]||1) + quest.statAmount } };
+      }
+      // Remove this quest from pending list
+      const pending = (newState.morningCheckin?.pendingQuests || []).filter(q => q.id !== id);
+      newState = { ...newState, morningCheckin: { ...newState.morningCheckin, pendingQuests: pending } };
+      return newState;
+    }
+    case 'DISMISS_MORNING_CHECKIN': {
+      const today = todayStr();
+      return { ...state, morningCheckin: { lastShownDate: today, pendingQuests: [] } };
+    }
+    case 'UPDATE_MORNING_PENDING': {
+      return { ...state, morningCheckin: { ...(state.morningCheckin||{}), pendingQuests: action.payload } };
     }
     case 'SET_BG_MUSIC': {
       return { ...state, bgMusic: { ...(state.bgMusic||{}), ...action.payload } };
     }
     case 'UPDATE_CUSTOM_STATS': {
       return { ...state, customStats: action.payload };
+    }
+    case 'UPDATE_PERSONAL_QUOTES': {
+      return { ...state, personalQuotes: action.payload };
     }
     case 'UPDATE_ASSESSMENT_ANSWERS': {
       return { ...state, assessmentAnswers: { ...(state.assessmentAnswers||{}), ...action.payload } };
@@ -1773,6 +1813,28 @@ function StatusScreen({ state, dispatch, addXP }) {
         <div style={{ fontSize:11, color:'var(--violet)', letterSpacing:2, marginBottom:8 }}>SYSTEM MESSAGE</div>
         <div style={{ fontSize:13, color:'var(--text)', lineHeight:1.7, fontStyle:'italic' }}>"{quote}"</div>
       </div>
+
+      {/* Personal Mantra */}
+      {(state.personalQuotes||[]).length > 0 && (() => {
+        const pq = state.personalQuotes;
+        const todayMantra = pq[Math.floor(Date.now() / 86400000) % pq.length];
+        return (
+          <div className="panel" style={{ padding:16, borderColor:'rgba(243,156,18,0.4)', background:'rgba(243,156,18,0.03)', textAlign:'center', flexShrink:0, position:'relative' }}>
+            <div style={{ fontSize:9, color:'var(--gold)', letterSpacing:3, marginBottom:8 }}>✦ YOUR MANTRA ✦</div>
+            <div style={{ fontSize:14, color:'var(--gold)', lineHeight:1.75, fontStyle:'italic', fontFamily:'Cinzel,serif' }}>
+              "{todayMantra.text}"
+            </div>
+            {todayMantra.author && (
+              <div style={{ fontSize:10, color:'var(--text-dim)', marginTop:8, letterSpacing:1 }}>— {todayMantra.author}</div>
+            )}
+            {pq.length > 1 && (
+              <div style={{ fontSize:9, color:'rgba(243,156,18,0.4)', marginTop:6, letterSpacing:1 }}>
+                {(Math.floor(Date.now() / 86400000) % pq.length) + 1} / {pq.length}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Hunter Mission Panel — aims/goals from onboarding — now editable */}
       <div className="panel" style={{ padding:16, borderColor:'rgba(243,156,18,0.3)', background:'rgba(243,156,18,0.03)', flexShrink:0 }}>
@@ -4175,6 +4237,136 @@ function WorkoutAssistant({ muscleName, muscleData, onClose, onLogWorkout }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // SETTINGS SCREEN — Theme, Notifications, Export, Data
 // ─────────────────────────────────────────────────────────────────────────────
+// MANAGE PERSONAL QUOTES PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+function ManageQuotesPanel({ state, dispatch, showNotif }) {
+  const quotes = state.personalQuotes || [];
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [draft, setDraft] = useState({ text:'', author:'' });
+  const [editDraft, setEditDraft] = useState({ text:'', author:'' });
+
+  const addQuote = () => {
+    if (!draft.text.trim()) return;
+    const updated = [...quotes, { id: Date.now(), text: draft.text.trim(), author: draft.author.trim() }];
+    dispatch({ type:'UPDATE_PERSONAL_QUOTES', payload: updated });
+    setDraft({ text:'', author:'' });
+    setShowAdd(false);
+    showNotif('💬 MANTRA ADDED');
+  };
+
+  const deleteQuote = (idx) => {
+    dispatch({ type:'UPDATE_PERSONAL_QUOTES', payload: quotes.filter((_,i)=>i!==idx) });
+    showNotif('🗑 MANTRA REMOVED');
+  };
+
+  const saveEdit = (idx) => {
+    if (!editDraft.text.trim()) return;
+    const updated = quotes.map((q,i) => i===idx ? { ...q, text:editDraft.text.trim(), author:editDraft.author.trim() } : q);
+    dispatch({ type:'UPDATE_PERSONAL_QUOTES', payload: updated });
+    setEditingIdx(null);
+    showNotif('✏️ MANTRA UPDATED');
+  };
+
+  const todayIdx = quotes.length > 0 ? Math.floor(Date.now() / 86400000) % quotes.length : -1;
+
+  return (
+    <div className="panel" style={{ padding:16, marginBottom:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+        <div className="cinzel" style={{ fontSize:12, color:'var(--gold)', letterSpacing:2 }}>💬 PERSONAL MANTRAS</div>
+        <button onClick={()=>{ setShowAdd(p=>!p); setEditingIdx(null); }}
+          style={{ padding:'5px 10px', borderRadius:5, cursor:'pointer', background:'rgba(243,156,18,0.1)', border:'1px solid rgba(243,156,18,0.4)', color:'var(--gold)', fontSize:10, fontFamily:'Cinzel,serif', letterSpacing:1 }}>
+          {showAdd ? '✕ CANCEL' : '+ ADD QUOTE'}
+        </button>
+      </div>
+
+      {/* Add form */}
+      {showAdd && (
+        <div style={{ background:'rgba(243,156,18,0.05)', border:'1px solid rgba(243,156,18,0.2)', borderRadius:8, padding:14, marginBottom:14 }}>
+          <div className="cinzel" style={{ fontSize:10, color:'var(--gold)', letterSpacing:2, marginBottom:10 }}>NEW MANTRA</div>
+          <textarea className="input-dark" value={draft.text} onChange={e=>setDraft(p=>({...p,text:e.target.value}))}
+            placeholder="Enter your motivational quote or personal mantra..."
+            rows={3} style={{ width:'100%', resize:'vertical', marginBottom:8, lineHeight:1.6, fontStyle:'italic' }}/>
+          <input className="input-dark" value={draft.author} onChange={e=>setDraft(p=>({...p,author:e.target.value}))}
+            placeholder="Source / Author (optional)" style={{ width:'100%', marginBottom:10 }}/>
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+            <button onClick={()=>setShowAdd(false)}
+              style={{ padding:'7px 14px', borderRadius:5, cursor:'pointer', background:'transparent', border:'1px solid rgba(255,255,255,0.1)', color:'var(--text-dim)', fontSize:11 }}>
+              CANCEL
+            </button>
+            <button onClick={addQuote} disabled={!draft.text.trim()}
+              style={{ padding:'7px 16px', borderRadius:5, cursor:'pointer', background:'rgba(243,156,18,0.15)', border:'1px solid rgba(243,156,18,0.5)', color:'var(--gold)', fontSize:11, fontFamily:'Cinzel,serif', letterSpacing:1, opacity: draft.text.trim() ? 1 : 0.4 }}>
+              ✅ SAVE
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Quotes list */}
+      {quotes.length === 0 && !showAdd && (
+        <div style={{ textAlign:'center', padding:'20px 0', color:'var(--text-dim)', fontSize:12 }}>
+          <div style={{ fontSize:28, marginBottom:8 }}>💬</div>
+          No personal mantras yet. Add one to see it on your Status screen daily.
+        </div>
+      )}
+
+      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+        {quotes.map((q, idx) => (
+          <div key={q.id||idx}>
+            {editingIdx === idx ? (
+              <div style={{ background:'rgba(243,156,18,0.06)', border:'1px solid rgba(243,156,18,0.25)', borderRadius:8, padding:12 }}>
+                <textarea className="input-dark" value={editDraft.text} onChange={e=>setEditDraft(p=>({...p,text:e.target.value}))}
+                  rows={3} style={{ width:'100%', resize:'vertical', marginBottom:8, lineHeight:1.6, fontStyle:'italic' }}/>
+                <input className="input-dark" value={editDraft.author} onChange={e=>setEditDraft(p=>({...p,author:e.target.value}))}
+                  placeholder="Source / Author (optional)" style={{ width:'100%', marginBottom:10 }}/>
+                <div style={{ display:'flex', gap:8 }}>
+                  <button onClick={()=>saveEdit(idx)}
+                    style={{ flex:1, padding:'8px', borderRadius:5, cursor:'pointer', background:'rgba(46,204,113,0.15)', border:'1px solid var(--success)', color:'var(--success)', fontSize:11, fontFamily:'Cinzel,serif' }}>
+                    ✅ SAVE
+                  </button>
+                  <button onClick={()=>setEditingIdx(null)}
+                    style={{ flex:1, padding:'8px', borderRadius:5, cursor:'pointer', background:'rgba(231,76,60,0.1)', border:'1px solid rgba(231,76,60,0.4)', color:'#E74C3C', fontSize:11, fontFamily:'Cinzel,serif' }}>
+                    ✕ CANCEL
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding:'12px 14px', borderRadius:8, background: idx===todayIdx ? 'rgba(243,156,18,0.08)' : 'rgba(255,255,255,0.03)', border: idx===todayIdx ? '1px solid rgba(243,156,18,0.4)' : '1px solid rgba(255,255,255,0.07)', position:'relative' }}>
+                {idx===todayIdx && (
+                  <div style={{ position:'absolute', top:8, right:10, fontSize:9, color:'var(--gold)', letterSpacing:1 }}>TODAY ✦</div>
+                )}
+                <div style={{ fontSize:13, color: idx===todayIdx ? 'var(--gold)' : 'var(--text)', fontStyle:'italic', lineHeight:1.65, paddingRight:48, marginBottom: q.author ? 6 : 0 }}>
+                  "{q.text}"
+                </div>
+                {q.author && (
+                  <div style={{ fontSize:10, color:'var(--text-dim)', letterSpacing:1 }}>— {q.author}</div>
+                )}
+                <div style={{ display:'flex', gap:6, marginTop:10 }}>
+                  <button onClick={()=>{ setEditingIdx(idx); setEditDraft({ text:q.text, author:q.author||'' }); setShowAdd(false); }}
+                    style={{ padding:'4px 10px', borderRadius:4, cursor:'pointer', background:'rgba(79,195,247,0.08)', border:'1px solid rgba(79,195,247,0.25)', color:'var(--mana)', fontSize:10 }}>
+                    ✏️ EDIT
+                  </button>
+                  <button onClick={()=>deleteQuote(idx)}
+                    style={{ padding:'4px 10px', borderRadius:4, cursor:'pointer', background:'rgba(231,76,60,0.08)', border:'1px solid rgba(231,76,60,0.25)', color:'#E74C3C', fontSize:10 }}>
+                    🗑 DELETE
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {quotes.length > 1 && (
+        <div style={{ fontSize:10, color:'var(--text-dim)', marginTop:10, textAlign:'center' }}>
+          Quotes rotate daily — one shown per day on your Status screen
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MANAGE STATS PANEL
 // ─────────────────────────────────────────────────────────────────────────────
 function ManageStatsPanel({ state, dispatch, showNotif }) {
@@ -4894,6 +5086,9 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
           </div>
         )}
 
+        {/* Personal Mantras */}
+        <ManageQuotesPanel state={state} dispatch={dispatch} showNotif={showNotif}/>
+
         {/* Manage Stats */}
         <ManageStatsPanel state={state} dispatch={dispatch} showNotif={showNotif}/>
 
@@ -5420,6 +5615,131 @@ const NAV_TABS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MORNING CHECK-IN MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+function MorningCheckinModal({ state, dispatch, addXP, showNotif, applyPenalty, onClose }) {
+  const quests = state.morningCheckin?.pendingQuests || [];
+  const [resolved, setResolved] = useState({}); // id -> 'done' | 'failed'
+
+  const markDone = (q) => {
+    dispatch({ type: 'COMPLETE_QUEST_RETROACTIVE', payload: { id: q.id } });
+    addXP(q.xp, 'retroactive_quest');
+    setResolved(p => ({ ...p, [q.id]: 'done' }));
+    showNotif(`✅ +${q.xp} XP — ${q.name}`);
+  };
+
+  const markFailed = (q) => {
+    applyPenalty(q.xp, `Failed quest: ${q.name}`);
+    setResolved(p => ({ ...p, [q.id]: 'failed' }));
+    const remaining = (state.morningCheckin?.pendingQuests || []).filter(qst => qst.id !== q.id);
+    dispatch({ type: 'UPDATE_MORNING_PENDING', payload: remaining });
+  };
+
+  const allResolved = quests.every(q => resolved[q.id]);
+
+  const dismiss = () => {
+    dispatch({ type: 'DISMISS_MORNING_CHECKIN' });
+    onClose();
+  };
+
+  const CATEGORY_ICONS = { routine:'🌅', mind:'📚', body:'💪', digital:'📵', lifestyle:'🌙', custom:'⚔️' };
+  const STATUS_COLORS = { done: 'var(--success)', failed: '#E74C3C' };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 950,
+      background: 'rgba(0,0,0,0.85)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      backdropFilter: 'blur(6px)',
+      padding: '0 16px',
+    }}>
+      <div style={{
+        background: 'var(--surface)', border: '1px solid rgba(79,195,247,0.2)',
+        borderRadius: 14, padding: 24, maxWidth: 480, width: '100%',
+        maxHeight: '85vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 0 40px rgba(79,195,247,0.1)',
+      }}>
+        {/* Header */}
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>🌅</div>
+          <div className="cinzel" style={{ fontSize: 15, color: 'var(--mana)', letterSpacing: 3, marginBottom: 6 }}>
+            MORNING CHECK-IN
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+            Did you complete these quests yesterday?<br/>
+            <span style={{ fontSize: 11, color: 'rgba(231,76,60,0.7)' }}>Failure will deduct XP and HP. Be honest.</span>
+          </div>
+        </div>
+
+        {/* Quest list */}
+        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+          {quests.map(q => {
+            const status = resolved[q.id];
+            return (
+              <div key={q.id} style={{
+                padding: '12px 14px', borderRadius: 9,
+                background: status === 'done' ? 'rgba(46,204,113,0.07)' : status === 'failed' ? 'rgba(231,76,60,0.07)' : 'rgba(79,195,247,0.04)',
+                border: `1px solid ${status === 'done' ? 'rgba(46,204,113,0.3)' : status === 'failed' ? 'rgba(231,76,60,0.25)' : 'rgba(79,195,247,0.12)'}`,
+                transition: 'all 0.2s',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>
+                    {status === 'done' ? '✅' : status === 'failed' ? '❌' : (CATEGORY_ICONS[q.category] || '⚔️')}
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, color: status ? STATUS_COLORS[status] : 'var(--text)', fontFamily: 'Cinzel,serif', lineHeight: 1.4, fontWeight: 600 }}>
+                      {q.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--gold)', marginTop: 3 }}>+{q.xp} XP{q.statReward ? ` · +${q.statAmount||1} ${getStatAbbr(q.statReward, null)}` : ''}</div>
+                  </div>
+                </div>
+
+                {/* Action buttons — only show if not yet resolved */}
+                {!status && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                    <button onClick={() => markDone(q)} style={{
+                      flex: 1, padding: '9px 0', borderRadius: 6, cursor: 'pointer',
+                      background: 'rgba(46,204,113,0.12)', border: '1px solid rgba(46,204,113,0.4)',
+                      color: 'var(--success)', fontFamily: 'Cinzel,serif', fontSize: 11, letterSpacing: 1,
+                    }}>
+                      ✅ YES, DONE
+                    </button>
+                    <button onClick={() => markFailed(q)} style={{
+                      flex: 1, padding: '9px 0', borderRadius: 6, cursor: 'pointer',
+                      background: 'rgba(231,76,60,0.08)', border: '1px solid rgba(231,76,60,0.3)',
+                      color: '#E74C3C', fontFamily: 'Cinzel,serif', fontSize: 11, letterSpacing: 1,
+                    }}>
+                      ❌ DIDN'T DO IT
+                    </button>
+                  </div>
+                )}
+                {status === 'done' && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: 'var(--success)', letterSpacing: 1 }}>XP awarded — well done, Hunter.</div>
+                )}
+                {status === 'failed' && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#E74C3C88', letterSpacing: 1 }}>⚠️ Penalty applied — −{q.xp} XP & HP lost.</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <button onClick={dismiss} style={{
+          width: '100%', padding: '12px 0', borderRadius: 8, cursor: 'pointer',
+          background: allResolved ? 'rgba(79,195,247,0.12)' : 'rgba(255,255,255,0.04)',
+          border: `1px solid ${allResolved ? 'var(--mana)' : 'rgba(255,255,255,0.1)'}`,
+          color: allResolved ? 'var(--mana)' : 'var(--text-dim)',
+          fontFamily: 'Cinzel,serif', fontSize: 12, letterSpacing: 2,
+        }}>
+          {allResolved ? '⚔️ CONTINUE YOUR JOURNEY' : 'SKIP — DEAL WITH IT LATER'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ROOT APP
 // ─────────────────────────────────────────────────────────────────────────────
 export default function App() {
@@ -5431,6 +5751,7 @@ export default function App() {
   const [notif, setNotif] = useState(null);
   const [showReset, setShowReset] = useState(false);
   const [showRankCard, setShowRankCard] = useState(false);
+  const [showMorningCheckin, setShowMorningCheckin] = useState(false);
   const notifTimer = useRef(null);
 
   // Load state on mount
@@ -5444,6 +5765,21 @@ export default function App() {
       setLoaded(true);
     });
   }, []);
+
+  // Morning check-in trigger
+  useEffect(() => {
+    if (!loaded || !state.onboarded) return;
+    const hour = new Date().getHours();
+    const today = todayStr();
+    const checkin = state.morningCheckin || {};
+    const pending = checkin.pendingQuests || [];
+    const lastShown = checkin.lastShownDate || '';
+    if (hour >= 6 && lastShown !== today && pending.length > 0) {
+      // Small delay so app finishes rendering first
+      const t = setTimeout(() => setShowMorningCheckin(true), 800);
+      return () => clearTimeout(t);
+    }
+  }, [loaded, state.onboarded]);
 
   // Auto-save
   useEffect(() => {
@@ -5762,6 +6098,18 @@ export default function App() {
 
       {/* Rank Card */}
       {showRankCard && <RankCardModal state={state} onClose={()=>setShowRankCard(false)}/>}
+
+      {/* Morning Check-in */}
+      {showMorningCheckin && (
+        <MorningCheckinModal
+          state={state}
+          dispatch={dispatch}
+          addXP={addXP}
+          showNotif={showNotif}
+          applyPenalty={applyPenalty}
+          onClose={() => setShowMorningCheckin(false)}
+        />
+      )}
     </>
   );
 }

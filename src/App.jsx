@@ -546,7 +546,8 @@ const buildInitialState = () => ({
   notifications: { enabled: false, time: '08:00', permission: 'default' },
   bosses: [],
   onboarded: false,
-  assessmentAnswers: {}
+  assessmentAnswers: {},
+  bgMusic: { type: null, ytVideoId: '', fileName: '', volume: 0.7, playing: false }
 });
 
 // ─── REDUCER ─────────────────────────────────────────────────────────────────
@@ -899,6 +900,12 @@ function reducer(state, action) {
       const today = todayStr();
       const daily = state.quests.daily.map(q => ({...q, completed: q.date===today ? q.completed : false, date: q.date===today ? q.date : ''}));
       return { ...state, quests:{ ...state.quests, daily } };
+    }
+    case 'SET_BG_MUSIC': {
+      return { ...state, bgMusic: { ...(state.bgMusic||{}), ...action.payload } };
+    }
+    case 'UPDATE_ASSESSMENT_ANSWERS': {
+      return { ...state, assessmentAnswers: { ...(state.assessmentAnswers||{}), ...action.payload } };
     }
     default: return state;
   }
@@ -1596,6 +1603,16 @@ function StatusScreen({ state, dispatch, addXP }) {
   const rankColor = RANK_COLORS[hunter.rank] || '#4FC3F7';
   const cls = CLASS_INFO[hunter.class] || CLASS_INFO.warrior;
 
+  const [showEditMission, setShowEditMission] = useState(false);
+  const [editGoal, setEditGoal] = useState(state.assessmentAnswers?.goal || '');
+  const [editPhysique, setEditPhysique] = useState(state.assessmentAnswers?.dreamPhysique || '');
+  const [editWeakness, setEditWeakness] = useState(state.assessmentAnswers?.weakness || '');
+
+  const saveMission = () => {
+    dispatch({ type:'UPDATE_ASSESSMENT_ANSWERS', payload:{ goal: editGoal, dreamPhysique: editPhysique, weakness: editWeakness } });
+    setShowEditMission(false);
+  };
+
   return (
     <div className="scrollable" style={{ height:'100%', overflowY:'auto', overflowX:'hidden' }}>
       <div style={{ padding:'16px', display:'flex', flexDirection:'column', gap:12, paddingBottom:24 }}>
@@ -1737,52 +1754,113 @@ function StatusScreen({ state, dispatch, addXP }) {
         <div style={{ fontSize:13, color:'var(--text)', lineHeight:1.7, fontStyle:'italic' }}>"{quote}"</div>
       </div>
 
-      {/* Hunter Mission Panel — aims/goals from onboarding */}
-      {(state.assessmentAnswers?.goal || state.assessmentAnswers?.dreamPhysique || state.assessmentAnswers?.weakness) && (
-        <div className="panel" style={{ padding:16, borderColor:'rgba(243,156,18,0.3)', background:'rgba(243,156,18,0.03)', flexShrink:0 }}>
-          <div className="cinzel" style={{ fontSize:11, color:'var(--gold)', letterSpacing:3, marginBottom:14 }}>⚔ HUNTER\'S MISSION CODEX</div>
-          {state.assessmentAnswers?.goal && (
-            <div style={{ marginBottom:12, padding:'10px 14px', borderRadius:6, background:'rgba(79,195,247,0.05)', border:'1px solid rgba(79,195,247,0.15)' }}>
-              <div style={{ fontSize:9, color:'var(--mana)', letterSpacing:3, marginBottom:5 }}>PRIMARY OBJECTIVE</div>
-              <div className="cinzel" style={{ fontSize:15, color:'#fff', fontWeight:700, lineHeight:1.4 }}>{state.assessmentAnswers.goal}</div>
+      {/* Hunter Mission Panel — aims/goals from onboarding — now editable */}
+      <div className="panel" style={{ padding:16, borderColor:'rgba(243,156,18,0.3)', background:'rgba(243,156,18,0.03)', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
+          <div className="cinzel" style={{ fontSize:11, color:'var(--gold)', letterSpacing:3 }}>⚔ HUNTER'S MISSION CODEX</div>
+          <button onClick={() => {
+            setEditGoal(state.assessmentAnswers?.goal || '');
+            setEditPhysique(state.assessmentAnswers?.dreamPhysique || '');
+            setEditWeakness(state.assessmentAnswers?.weakness || '');
+            setShowEditMission(true);
+          }} style={{
+            background:'rgba(243,156,18,0.1)', border:'1px solid rgba(243,156,18,0.4)',
+            borderRadius:6, padding:'5px 10px', cursor:'pointer',
+            color:'var(--gold)', fontSize:10, fontFamily:'Cinzel,serif', letterSpacing:1,
+            display:'flex', alignItems:'center', gap:4
+          }}>
+            <Edit3 size={10}/> EDIT
+          </button>
+        </div>
+
+        {(state.assessmentAnswers?.goal || state.assessmentAnswers?.dreamPhysique || state.assessmentAnswers?.weakness) ? (
+          <>
+            {state.assessmentAnswers?.goal && (
+              <div style={{ marginBottom:12, padding:'10px 14px', borderRadius:6, background:'rgba(79,195,247,0.05)', border:'1px solid rgba(79,195,247,0.15)' }}>
+                <div style={{ fontSize:9, color:'var(--mana)', letterSpacing:3, marginBottom:5 }}>PRIMARY OBJECTIVE</div>
+                <div className="cinzel" style={{ fontSize:15, color:'#fff', fontWeight:700, lineHeight:1.4 }}>{state.assessmentAnswers.goal}</div>
+              </div>
+            )}
+            <div style={{ display:'flex', gap:8 }}>
+              {state.assessmentAnswers?.dreamPhysique && (
+                <div style={{ flex:1, padding:'10px 12px', borderRadius:6, background:'rgba(231,76,60,0.06)', border:'1px solid rgba(231,76,60,0.2)' }}>
+                  <div style={{ fontSize:9, color:'#E74C3C', letterSpacing:2, marginBottom:5 }}>PHYSIQUE AIM</div>
+                  <div className="cinzel" style={{ fontSize:13, color:'#E74C3C', fontWeight:700 }}>{state.assessmentAnswers.dreamPhysique}</div>
+                </div>
+              )}
+              {state.assessmentAnswers?.weakness && (
+                <div style={{ flex:1, padding:'10px 12px', borderRadius:6, background:'rgba(155,89,182,0.06)', border:'1px solid rgba(155,89,182,0.2)' }}>
+                  <div style={{ fontSize:9, color:'var(--violet)', letterSpacing:2, marginBottom:5 }}>ENEMY TO DEFEAT</div>
+                  <div className="cinzel" style={{ fontSize:13, color:'var(--violet)', fontWeight:700 }}>{state.assessmentAnswers.weakness}</div>
+                </div>
+              )}
             </div>
-          )}
-          <div style={{ display:'flex', gap:8 }}>
-            {state.assessmentAnswers?.dreamPhysique && (
-              <div style={{ flex:1, padding:'10px 12px', borderRadius:6, background:'rgba(231,76,60,0.06)', border:'1px solid rgba(231,76,60,0.2)' }}>
-                <div style={{ fontSize:9, color:'#E74C3C', letterSpacing:2, marginBottom:5 }}>PHYSIQUE AIM</div>
-                <div className="cinzel" style={{ fontSize:13, color:'#E74C3C', fontWeight:700 }}>{state.assessmentAnswers.dreamPhysique}</div>
+            {/* Motivational quote tied to their goal */}
+            <div style={{ marginTop:12, padding:'10px 14px', borderRadius:6, background:'rgba(243,156,18,0.06)', border:'1px solid rgba(243,156,18,0.18)', textAlign:'center' }}>
+              <div style={{ fontSize:9, color:'var(--gold)', letterSpacing:3, marginBottom:5 }}>DAILY FUEL</div>
+              <div style={{ fontSize:12, color:'var(--gold)', fontStyle:'italic', lineHeight:1.6 }}>
+                {[
+                  "The shadow you fight today becomes the power you wield tomorrow.",
+                  "Every rep, every page, every decision — it compounds. Trust the grind.",
+                  "You are not behind. You are exactly where your next level begins.",
+                  "The gate doesn't open for the prepared. It opens for those who refuse to stop.",
+                  "Pain is temporary. The version of you on the other side is permanent.",
+                  "Your weakness named is your weakness claimed — now conquer it.",
+                  "Rise not because it's easy. Rise because you said you would.",
+                ][Math.floor(Date.now() / 86400000) % 7]}
               </div>
-            )}
-            {state.assessmentAnswers?.weakness && (
-              <div style={{ flex:1, padding:'10px 12px', borderRadius:6, background:'rgba(155,89,182,0.06)', border:'1px solid rgba(155,89,182,0.2)' }}>
-                <div style={{ fontSize:9, color:'var(--violet)', letterSpacing:2, marginBottom:5 }}>ENEMY TO DEFEAT</div>
-                <div className="cinzel" style={{ fontSize:13, color:'var(--violet)', fontWeight:700 }}>{state.assessmentAnswers.weakness}</div>
-              </div>
-            )}
+            </div>
+          </>
+        ) : (
+          <div style={{ textAlign:'center', padding:'20px 0' }}>
+            <div style={{ fontSize:28, marginBottom:8 }}>📜</div>
+            <div style={{ fontSize:12, color:'var(--text-dim)', marginBottom:12 }}>No mission codex set yet.</div>
+            <button onClick={() => { setEditGoal(''); setEditPhysique(''); setEditWeakness(''); setShowEditMission(true); }}
+              className="btn-gold" style={{ fontSize:11 }}>
+              + SET YOUR MISSION
+            </button>
           </div>
-          {/* Motivational quote tied to their goal */}
-          <div style={{ marginTop:12, padding:'10px 14px', borderRadius:6, background:'rgba(243,156,18,0.06)', border:'1px solid rgba(243,156,18,0.18)', textAlign:'center' }}>
-            <div style={{ fontSize:9, color:'var(--gold)', letterSpacing:3, marginBottom:5 }}>DAILY FUEL</div>
-            <div style={{ fontSize:12, color:'var(--gold)', fontStyle:'italic', lineHeight:1.6 }}>
-              {[
-                "The shadow you fight today becomes the power you wield tomorrow.",
-                "Every rep, every page, every decision — it compounds. Trust the grind.",
-                "You are not behind. You are exactly where your next level begins.",
-                "The gate doesn't open for the prepared. It opens for those who refuse to stop.",
-                "Pain is temporary. The version of you on the other side is permanent.",
-                "Your weakness named is your weakness claimed — now conquer it.",
-                "Rise not because it\'s easy. Rise because you said you would.",
-              ][Math.floor(Date.now() / 86400000) % 7]}
+        )}
+      </div>
+
+      {/* Edit Mission Modal */}
+      {showEditMission && (
+        <div className="modal-overlay" onClick={() => setShowEditMission(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{ maxWidth:400 }}>
+            <div className="cinzel" style={{ fontSize:16, color:'var(--gold)', marginBottom:6 }}>⚔ EDIT MISSION CODEX</div>
+            <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:20 }}>Update your goals and battles. The system remembers.</div>
+
+            <div style={{ marginBottom:14 }}>
+              <label style={{ display:'block', fontSize:11, color:'var(--mana)', letterSpacing:2, marginBottom:7 }}>PRIMARY OBJECTIVE (Life Goal)</label>
+              <input className="input-dark" value={editGoal} onChange={e=>setEditGoal(e.target.value)} placeholder="Your #1 life goal right now..."/>
+            </div>
+
+            <div style={{ marginBottom:14 }}>
+              <label style={{ display:'block', fontSize:11, color:'#E74C3C', letterSpacing:2, marginBottom:7 }}>PHYSIQUE AIM</label>
+              <input className="input-dark" value={editPhysique} onChange={e=>setEditPhysique(e.target.value)} placeholder="shredded / aesthetic / powerful..."/>
+            </div>
+
+            <div style={{ marginBottom:22 }}>
+              <label style={{ display:'block', fontSize:11, color:'var(--violet)', letterSpacing:2, marginBottom:7 }}>ENEMY TO DEFEAT (Biggest Weakness)</label>
+              <input className="input-dark" value={editWeakness} onChange={e=>setEditWeakness(e.target.value)} placeholder="Name your enemy..."/>
+            </div>
+
+            <div style={{ display:'flex', gap:8 }}>
+              <button className="btn-gold" onClick={saveMission} style={{ flex:1, padding:'11px' }}>
+                ✅ SAVE MISSION
+              </button>
+              <button className="btn-danger" onClick={() => setShowEditMission(false)} style={{ flex:1 }}>
+                CANCEL
+              </button>
             </div>
           </div>
         </div>
       )}
+
       </div>
     </div>
   );
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // QUESTS SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4095,6 +4173,251 @@ function WorkoutAssistant({ muscleName, muscleData, onClose, onLogWorkout }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // SETTINGS SCREEN — Theme, Notifications, Export, Data
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// BACKGROUND MUSIC SETTINGS PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+function BgMusicSettingsPanel({ state, dispatch, showNotif }) {
+  const bgMusic = state.bgMusic || {};
+  const [ytInput, setYtInput] = useState('');
+  const [ytError, setYtError] = useState('');
+
+  const extractYtId = (url) => {
+    try {
+      const u = new URL(url.trim());
+      // youtube.com/watch?v=ID or music.youtube.com/watch?v=ID
+      if (u.searchParams.get('v')) return u.searchParams.get('v');
+      // youtu.be/ID
+      if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('?')[0];
+      return null;
+    } catch { return null; }
+  };
+
+  const handleYtSave = () => {
+    const id = extractYtId(ytInput);
+    if (!id) { setYtError('Invalid YouTube URL. Try: youtube.com/watch?v=...'); return; }
+    setYtError('');
+    dispatch({ type:'SET_BG_MUSIC', payload:{ type:'youtube', ytVideoId:id, fileName:'YouTube Track', playing:true } });
+    showNotif('🎵 TRACK LOADED — PLAYING NOW');
+    setYtInput('');
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 30 * 1024 * 1024) { showNotif('❌ FILE TOO LARGE (MAX 30MB)'); return; }
+    if (typeof window._bgMusicLoadFile === 'function') window._bgMusicLoadFile(file);
+    dispatch({ type:'SET_BG_MUSIC', payload:{ type:'file', fileName:file.name, ytVideoId:'', playing:true } });
+    showNotif(`🎵 ${file.name} — LOADED`);
+    e.target.value = '';
+  };
+
+  const clearMusic = () => {
+    dispatch({ type:'SET_BG_MUSIC', payload:{ type:null, ytVideoId:'', fileName:'', playing:false } });
+    showNotif('🔇 MUSIC CLEARED');
+  };
+
+  const vol = bgMusic.volume ?? 0.7;
+
+  return (
+    <div className="panel" style={{ padding:16, marginBottom:12, borderColor:'rgba(79,195,247,0.25)' }}>
+      <div className="cinzel" style={{ fontSize:11, color:'var(--text-dim)', letterSpacing:3, marginBottom:14 }}>🎵 MAIN CHARACTER SOUNDTRACK</div>
+      <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:16, lineHeight:1.6 }}>
+        Set a track to play continuously in the background while the app is open. Fuel your grind.
+      </div>
+
+      {/* Current track status */}
+      {bgMusic.type && (
+        <div style={{ marginBottom:14, padding:'10px 14px', borderRadius:8, background:'rgba(79,195,247,0.06)', border:'1px solid rgba(79,195,247,0.2)', display:'flex', alignItems:'center', gap:10 }}>
+          <span style={{ fontSize:18, animation: bgMusic.playing ? 'breathe 1.5s ease-in-out infinite' : 'none' }}>
+            {bgMusic.type === 'youtube' ? '▶️' : '🎵'}
+          </span>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:12, color:'var(--text)', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {bgMusic.fileName || 'Track'}
+            </div>
+            <div style={{ fontSize:10, color: bgMusic.playing ? 'var(--mana)' : 'var(--text-dim)', letterSpacing:1, marginTop:2 }}>
+              {bgMusic.playing ? '● PLAYING' : '● PAUSED'} · {bgMusic.type === 'youtube' ? 'YouTube' : 'Local File'}
+            </div>
+          </div>
+          <button
+            onClick={() => dispatch({ type:'SET_BG_MUSIC', payload:{ playing: !bgMusic.playing } })}
+            style={{ background:'rgba(79,195,247,0.1)', border:'1px solid var(--mana)', borderRadius:20, padding:'5px 12px', cursor:'pointer', color:'var(--mana)', fontSize:12, fontFamily:'Cinzel,serif' }}
+          >
+            {bgMusic.playing ? 'PAUSE' : 'PLAY'}
+          </button>
+        </div>
+      )}
+
+      {/* Volume */}
+      {bgMusic.type && (
+        <div style={{ marginBottom:16 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>
+            <span>Volume</span>
+            <span style={{ color:'var(--mana)' }}>{Math.round(vol * 100)}%</span>
+          </div>
+          <input type="range" min={0} max={1} step={0.05} value={vol}
+            onChange={e => dispatch({ type:'SET_BG_MUSIC', payload:{ volume: parseFloat(e.target.value) } })}
+            style={{ width:'100%', accentColor:'var(--mana)' }}
+          />
+        </div>
+      )}
+
+      {/* YouTube URL */}
+      <div style={{ marginBottom:14 }}>
+        <div style={{ fontSize:12, color:'var(--text)', marginBottom:6, fontWeight:600 }}>🔗 YouTube / YouTube Music URL</div>
+        <div style={{ fontSize:10, color:'var(--text-dim)', marginBottom:8 }}>Paste any YouTube video link (music, lofi, hype playlist, etc.)</div>
+        <div style={{ display:'flex', gap:8 }}>
+          <input
+            className="input-dark"
+            value={ytInput}
+            onChange={e => { setYtInput(e.target.value); setYtError(''); }}
+            placeholder="https://youtube.com/watch?v=..."
+            style={{ flex:1, fontSize:12 }}
+          />
+          <button className="btn-mana" onClick={handleYtSave} style={{ whiteSpace:'nowrap', padding:'8px 14px' }}>
+            LOAD
+          </button>
+        </div>
+        {ytError && <div style={{ fontSize:10, color:'var(--crimson)', marginTop:6 }}>{ytError}</div>}
+        <div style={{ fontSize:10, color:'var(--text-dim)', marginTop:6, fontStyle:'italic' }}>
+          Note: YouTube tracks play in a hidden iframe. Some tracks may be restricted by YouTube.
+        </div>
+      </div>
+
+      {/* File Upload */}
+      <div style={{ marginBottom: bgMusic.type ? 14 : 0, padding:'12px', borderRadius:8, background:'rgba(155,89,182,0.05)', border:'1px dashed rgba(155,89,182,0.3)' }}>
+        <div style={{ fontSize:12, color:'var(--text)', marginBottom:6, fontWeight:600 }}>📁 Upload Music File</div>
+        <div style={{ fontSize:10, color:'var(--text-dim)', marginBottom:10 }}>Upload an MP3, WAV, OGG, or M4A file from your device</div>
+        <label style={{
+          display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+          padding:'10px', borderRadius:6, cursor:'pointer',
+          background:'rgba(155,89,182,0.12)', border:'1px solid rgba(155,89,182,0.4)',
+          color:'var(--violet)', fontSize:12, fontFamily:'Cinzel,serif', letterSpacing:1
+        }}>
+          <span>⬆ UPLOAD FILE</span>
+          <input type="file" accept="audio/*" onChange={handleFileUpload} style={{ display:'none' }}/>
+        </label>
+      </div>
+
+      {bgMusic.type && (
+        <button onClick={clearMusic} style={{
+          marginTop:12, width:'100%', padding:'8px', borderRadius:6, cursor:'pointer',
+          background:'none', border:'1px solid rgba(231,76,60,0.3)',
+          color:'rgba(231,76,60,0.7)', fontSize:11, fontFamily:'Cinzel,serif'
+        }}>
+          🔇 REMOVE TRACK
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BACKGROUND MUSIC PLAYER COMPONENT
+// ─────────────────────────────────────────────────────────────────────────────
+function BgMusicPlayer({ state, dispatch }) {
+  const bgMusic = state.bgMusic || {};
+  const audioRef = useRef(null);
+  const fileUrlRef = useRef(null);
+  const iframeRef = useRef(null);
+  const [fileObjUrl, setFileObjUrl] = useState(null);
+
+  // Sync volume on change
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = bgMusic.volume ?? 0.7;
+    }
+  }, [bgMusic.volume]);
+
+  // Play/pause file audio
+  useEffect(() => {
+    if (bgMusic.type !== 'file' || !audioRef.current) return;
+    if (bgMusic.playing) {
+      audioRef.current.play().catch(()=>{});
+    } else {
+      audioRef.current.pause();
+    }
+  }, [bgMusic.playing, bgMusic.type]);
+
+  // When fileObjUrl changes, reload audio
+  useEffect(() => {
+    if (!fileObjUrl || !audioRef.current) return;
+    audioRef.current.src = fileObjUrl;
+    audioRef.current.loop = true;
+    audioRef.current.volume = bgMusic.volume ?? 0.7;
+    if (bgMusic.playing) audioRef.current.play().catch(()=>{});
+  }, [fileObjUrl]);
+
+  // Expose file loader
+  if (typeof window !== 'undefined') {
+    window._bgMusicLoadFile = (file) => {
+      if (fileUrlRef.current) URL.revokeObjectURL(fileUrlRef.current);
+      const url = URL.createObjectURL(file);
+      fileUrlRef.current = url;
+      setFileObjUrl(url);
+    };
+  }
+
+  if (!bgMusic.type) return null;
+
+  const isYt = bgMusic.type === 'youtube';
+  const ytSrc = isYt && bgMusic.ytVideoId
+    ? `https://www.youtube.com/embed/${bgMusic.ytVideoId}?autoplay=${bgMusic.playing?1:0}&loop=1&playlist=${bgMusic.ytVideoId}&controls=0&mute=0`
+    : null;
+
+  return (
+    <>
+      {/* Hidden audio for file */}
+      {bgMusic.type === 'file' && (
+        <audio ref={audioRef} loop style={{ display:'none' }}/>
+      )}
+      {/* Hidden YouTube iframe */}
+      {isYt && ytSrc && bgMusic.playing && (
+        <iframe
+          ref={iframeRef}
+          src={ytSrc}
+          allow="autoplay"
+          style={{ position:'fixed', width:1, height:1, bottom:0, left:0, opacity:0, pointerEvents:'none', zIndex:-1, border:'none' }}
+          title="bg-music"
+        />
+      )}
+      {/* Floating mini player */}
+      <div style={{
+        position:'fixed', bottom:64, right:12, zIndex:800,
+        background:'rgba(5,5,15,0.92)', border:`1px solid ${bgMusic.playing ? 'rgba(79,195,247,0.5)' : 'rgba(79,195,247,0.2)'}`,
+        borderRadius:28, padding:'7px 13px', display:'flex', alignItems:'center', gap:9,
+        backdropFilter:'blur(12px)',
+        boxShadow: bgMusic.playing ? '0 0 18px rgba(79,195,247,0.25)' : 'none',
+        transition:'all 0.3s', maxWidth:200,
+      }}>
+        <span style={{ fontSize:14, animation: bgMusic.playing ? 'breathe 1.5s ease-in-out infinite' : 'none' }}>🎵</span>
+        <div style={{ flex:1, overflow:'hidden', minWidth:0 }}>
+          <div style={{
+            fontSize:9, color: bgMusic.playing ? 'var(--mana)' : 'var(--text-dim)',
+            letterSpacing:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+            fontFamily:'Cinzel,serif'
+          }}>
+            {bgMusic.fileName || (isYt ? 'YOUTUBE TRACK' : 'NO TRACK') }
+          </div>
+          <div style={{ fontSize:8, color:'var(--text-dim)', letterSpacing:1, marginTop:1 }}>
+            {bgMusic.playing ? '▶ PLAYING' : '⏸ PAUSED'}
+          </div>
+        </div>
+        <button
+          onClick={() => dispatch({ type:'SET_BG_MUSIC', payload:{ playing: !bgMusic.playing } })}
+          style={{
+            background:'none', border:'none', cursor:'pointer', padding:3,
+            color: bgMusic.playing ? 'var(--mana)' : 'var(--text-dim)',
+            fontSize:16, lineHeight:1, transition:'color 0.2s'
+          }}
+        >
+          {bgMusic.playing ? '⏸' : '▶'}
+        </button>
+      </div>
+    </>
+  );
+}
+
 function SettingsScreen({ state, dispatch, showNotif, sfx }) {
   const [notifTime, setNotifTime] = useState(state.notifications?.time || '08:00');
   const soundEnabled = state.soundEnabled !== false;
@@ -4391,6 +4714,9 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
             </div>
           </div>
         )}
+
+        {/* Background Music */}
+        <BgMusicSettingsPanel state={state} dispatch={dispatch} showNotif={showNotif}/>
 
         {/* App Info */}
         <div className="panel" style={{ padding:16, textAlign:'center' }}>
@@ -5166,6 +5492,9 @@ export default function App() {
 
       {/* XP Floats */}
       <XPFloat floats={floats}/>
+
+      {/* Background Music Player */}
+      <BgMusicPlayer state={state} dispatch={dispatch}/>
 
       {/* Notif */}
       {notif && <div className="quest-cleared-overlay">{notif}</div>}

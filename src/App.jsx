@@ -591,7 +591,7 @@ function reducer(state, action) {
       const activeMult = (boostMult && boostMult > 1) ? boostMult : 1;
       const boostedAmount = Math.round(amount * activeMult);
 
-      const coinsEarned = Math.floor(boostedAmount / 50);
+      const coinsEarned = Math.floor(boostedAmount / 1000);
       const newCoins = (state.hunter.coins || 0) + coinsEarned;
       totalXP += boostedAmount;
       let leveled = false;
@@ -1667,6 +1667,11 @@ function StatusScreen({ state, dispatch, addXP }) {
   const [editGoal, setEditGoal] = useState(state.assessmentAnswers?.goal || '');
   const [editPhysique, setEditPhysique] = useState(state.assessmentAnswers?.dreamPhysique || '');
   const [editWeakness, setEditWeakness] = useState(state.assessmentAnswers?.weakness || '');
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
 
   const saveMission = () => {
     dispatch({ type:'UPDATE_ASSESSMENT_ANSWERS', payload:{ goal: editGoal, dreamPhysique: editPhysique, weakness: editWeakness } });
@@ -1747,12 +1752,18 @@ function StatusScreen({ state, dispatch, addXP }) {
       {/* XP Boost Panel */}
       {(() => {
         const boost = hunter.boostMult && hunter.boostMult > 1;
-        const expired = hunter.boostEnd && Date.now() > hunter.boostEnd;
+        const expired = hunter.boostEnd && now > hunter.boostEnd;
         const permanent = boost && !hunter.boostEnd;
         if (!boost || expired) return null;
-        const msLeft = hunter.boostEnd ? hunter.boostEnd - Date.now() : null;
-        const hrsLeft = msLeft ? Math.ceil(msLeft / 3600000) : null;
-        const timeStr = permanent ? 'PERMANENT' : hrsLeft >= 24 ? `${Math.ceil(hrsLeft/24)}d remaining` : `${hrsLeft}h remaining`;
+        const msLeft = hunter.boostEnd ? hunter.boostEnd - now : null;
+        const totalMins = msLeft ? Math.ceil(msLeft / 60000) : null;
+        const days = totalMins ? Math.floor(totalMins / 1440) : 0;
+        const hrs = totalMins ? Math.floor((totalMins % 1440) / 60) : 0;
+        const mins = totalMins ? totalMins % 60 : 0;
+        const timeStr = permanent ? 'PERMANENT'
+          : days >= 1 ? `${days}d ${hrs}h remaining`
+          : hrs >= 1 ? `${hrs}h ${mins}m remaining`
+          : `${mins}m remaining`;
         return (
           <div className="panel" style={{ padding:16, flexShrink:0, borderColor:'rgba(243,156,18,0.4)', background:'rgba(243,156,18,0.05)', boxShadow:'0 0 20px rgba(243,156,18,0.1)' }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -1956,6 +1967,11 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
   const [newQuest, setNewQuest] = useState({ name:'', xp:100, target:1, desc:'', statReward:'', statAmount:1, rewardId:'' });
   const [newSideQuest, setNewSideQuest] = useState({ name:'', desc:'', xp:100, statRewards:[{stat:'',amount:1},{stat:'',amount:1}] });
   const today = todayStr();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
 
   const failQuest = (q) => {
     applyPenalty(q.xp, `Failed quest: ${q.name}`);
@@ -2064,7 +2080,15 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
         {tab==='daily' && (
           <>
             <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:12, letterSpacing:1 }}>
-              ⚡ Resets at midnight — Daily Dungeon
+              {(() => {
+                const midnight = new Date(now);
+                midnight.setHours(24,0,0,0);
+                const msLeft = midnight.getTime() - now;
+                const hrs = Math.floor(msLeft / 3600000);
+                const mins = Math.floor((msLeft % 3600000) / 60000);
+                const resetStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+                return `⚡ Resets at midnight — ${resetStr} remaining`;
+              })()}
             </div>
             {state.quests.daily.map(q=>(
               <QuestCard key={q.id} quest={q} completed={q.completed && q.date===today} onComplete={()=>completeDaily(q)} onDelete={()=>dispatch({type:'DELETE_DAILY_QUEST',payload:q.id})} onFail={()=>failQuest(q)} color="var(--mana)" customRewards={customRewards}/>

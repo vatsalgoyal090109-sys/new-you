@@ -591,7 +591,7 @@ function reducer(state, action) {
       const activeMult = (boostMult && boostMult > 1) ? boostMult : 1;
       const boostedAmount = Math.round(amount * activeMult);
 
-      const coinsEarned = Math.floor(boostedAmount / 50);
+      const coinsEarned = Math.floor(boostedAmount / 1000);
       const newCoins = (state.hunter.coins || 0) + coinsEarned;
       totalXP += boostedAmount;
       let leveled = false;
@@ -805,6 +805,38 @@ function reducer(state, action) {
     }
     case 'DELETE_MAIN_QUEST': {
       return { ...state, quests:{...state.quests, main: state.quests.main.filter(q=>q.id!==action.payload)} };
+    }
+    case 'UPDATE_DAILY_QUEST': {
+      const daily = state.quests.daily.map(q => q.id===action.payload.id ? {...q,...action.payload.updates} : q);
+      return { ...state, quests:{...state.quests, daily} };
+    }
+    case 'UPDATE_WEEKLY_QUEST': {
+      const weekly = state.quests.weekly.map(q => q.id===action.payload.id ? {...q,...action.payload.updates} : q);
+      return { ...state, quests:{...state.quests, weekly} };
+    }
+    case 'UPDATE_MAIN_QUEST': {
+      const main = state.quests.main.map(q => q.id===action.payload.id ? {...q,...action.payload.updates} : q);
+      return { ...state, quests:{...state.quests, main} };
+    }
+    case 'UPDATE_SIDE_QUEST': {
+      const side = (state.quests.side||[]).map(q => q.id===action.payload.id ? {...q,...action.payload.updates} : q);
+      return { ...state, quests:{...state.quests, side} };
+    }
+    case 'COMPLETE_SUB_QUEST': {
+      const { questType, questId, subId } = action.payload;
+      const arr = state.quests[questType] || [];
+      const updated = arr.map(q => {
+        if (q.id !== questId) return q;
+        const subs = (q.subQuests||[]).map(s => s.id===subId ? {...s, completed:true} : s);
+        return {...q, subQuests:subs};
+      });
+      return { ...state, quests:{...state.quests, [questType]:updated} };
+    }
+    case 'FAIL_TIMED_QUEST': {
+      const { questType, questId } = action.payload;
+      const arr = state.quests[questType] || [];
+      const updated = arr.map(q => q.id===questId ? {...q, failed:true, timedOut:true} : q);
+      return { ...state, quests:{...state.quests, [questType]:updated} };
     }
     case 'ADD_SIDE_QUEST': {
       const q = { id:'side_'+Date.now(), ...action.payload, completed:false, createdAt:Date.now() };
@@ -1649,6 +1681,42 @@ function RadarChart({ stats, statDefs }) {
   );
 }
 
+function BoostPanel({ hunter }) {
+  const permanent = !hunter.boostEnd;
+  const timeLeft = useCountdown(permanent ? null : hunter.boostEnd);
+  const totalMs = RANK_BOOST[hunter.rank]?.durationHours * 3600000 || 1;
+  const pct = !permanent && timeLeft !== null ? Math.min(100, (timeLeft / totalMs) * 100) : 100;
+  const timeStr = permanent ? 'PERMANENT' : (timeLeft !== null ? formatCountdown(timeLeft) : '');
+  return (
+    <div className="panel" style={{ padding:16, flexShrink:0, borderColor:'rgba(243,156,18,0.4)', background:'rgba(243,156,18,0.05)', boxShadow:'0 0 20px rgba(243,156,18,0.1)' }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <div>
+          <div className="cinzel" style={{ fontSize:11, color:'#F39C1288', letterSpacing:3, marginBottom:4 }}>⚡ XP BOOST ACTIVE</div>
+          <div className="cinzel" style={{ fontSize:32, color:'#F39C12', fontWeight:900, textShadow:'0 0 15px #F39C12', lineHeight:1 }}>
+            {hunter.boostMult}x XP
+          </div>
+          <div style={{ fontSize:11, color:'#F39C12aa', marginTop:4, fontFamily:'Courier New', letterSpacing:1 }}>{timeStr}</div>
+        </div>
+        <div style={{ textAlign:'right' }}>
+          <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:4 }}>{hunter.rank}-RANK BOOST</div>
+          <div style={{ fontSize:10, color:'var(--text-dim)' }}>All XP ×{hunter.boostMult}</div>
+        </div>
+      </div>
+      {!permanent && (
+        <div style={{ marginTop:10 }}>
+          <div style={{ height:4, background:'rgba(243,156,18,0.1)', borderRadius:2, overflow:'hidden' }}>
+            <div style={{
+              height:'100%', borderRadius:2,
+              background:'linear-gradient(90deg, #F39C12, #FFD700)',
+              width:`${pct}%`, transition:'width 1s linear'
+            }}/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatusScreen({ state, dispatch, addXP }) {
   const { hunter, stats, quests, habits } = state;
   const statDefs = getStatDefs(state);
@@ -1750,38 +1818,7 @@ function StatusScreen({ state, dispatch, addXP }) {
         const expired = hunter.boostEnd && Date.now() > hunter.boostEnd;
         const permanent = boost && !hunter.boostEnd;
         if (!boost || expired) return null;
-        const msLeft = hunter.boostEnd ? hunter.boostEnd - Date.now() : null;
-        const hrsLeft = msLeft ? Math.ceil(msLeft / 3600000) : null;
-        const timeStr = permanent ? 'PERMANENT' : hrsLeft >= 24 ? `${Math.ceil(hrsLeft/24)}d remaining` : `${hrsLeft}h remaining`;
-        return (
-          <div className="panel" style={{ padding:16, flexShrink:0, borderColor:'rgba(243,156,18,0.4)', background:'rgba(243,156,18,0.05)', boxShadow:'0 0 20px rgba(243,156,18,0.1)' }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-              <div>
-                <div className="cinzel" style={{ fontSize:11, color:'#F39C1288', letterSpacing:3, marginBottom:4 }}>⚡ XP BOOST ACTIVE</div>
-                <div className="cinzel" style={{ fontSize:32, color:'#F39C12', fontWeight:900, textShadow:'0 0 15px #F39C12', lineHeight:1 }}>
-                  {hunter.boostMult}x XP
-                </div>
-                <div style={{ fontSize:11, color:'#F39C12aa', marginTop:4 }}>{timeStr}</div>
-              </div>
-              <div style={{ textAlign:'right' }}>
-                <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:4 }}>{hunter.rank}-RANK BOOST</div>
-                <div style={{ fontSize:10, color:'var(--text-dim)' }}>All XP ×{hunter.boostMult}</div>
-              </div>
-            </div>
-            {!permanent && msLeft && (
-              <div style={{ marginTop:10 }}>
-                <div style={{ height:4, background:'rgba(243,156,18,0.1)', borderRadius:2, overflow:'hidden' }}>
-                  <div style={{
-                    height:'100%', borderRadius:2,
-                    background:'linear-gradient(90deg, #F39C12, #FFD700)',
-                    width:`${Math.min(100, (msLeft / (RANK_BOOST[hunter.rank]?.durationHours * 3600000 || 1)) * 100)}%`,
-                    transition:'width 1s linear'
-                  }}/>
-                </div>
-              </div>
-            )}
-          </div>
-        );
+        return <BoostPanel hunter={hunter}/>;
       })()}
 
       {/* Daily Quest Preview */}
@@ -1953,9 +1990,27 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
   const [showAddDaily, setShowAddDaily] = useState(false);
   const [showAddWeekly, setShowAddWeekly] = useState(false);
   const [showAddSide, setShowAddSide] = useState(false);
-  const [newQuest, setNewQuest] = useState({ name:'', xp:100, target:1, desc:'', statReward:'', statAmount:1, rewardId:'' });
+  const [editQuest, setEditQuest] = useState(null); // { quest, questType }
+  const [newQuest, setNewQuest] = useState({ name:'', xp:100, target:1, desc:'', statReward:'', statAmount:1, rewardId:'',
+    timerDays:'', timerHrs:'', timerMins:'',
+    subQuests:[] });
+  const [newSubName, setNewSubName] = useState('');
+  const [newSubXp, setNewSubXp] = useState(50);
   const [newSideQuest, setNewSideQuest] = useState({ name:'', desc:'', xp:100, statRewards:[{stat:'',amount:1},{stat:'',amount:1}] });
   const today = todayStr();
+
+  const calcDeadline = (q) => {
+    const d = +q.timerDays||0, h = +q.timerHrs||0, m = +q.timerMins||0;
+    if (d+h+m === 0) return null;
+    return Date.now() + (d*86400 + h*3600 + m*60) * 1000;
+  };
+
+  const addSubToNew = () => {
+    if (!newSubName.trim()) return;
+    setNewQuest(p => ({...p, subQuests:[...p.subQuests, { id:'sub_'+Date.now(), name:newSubName.trim(), xp:+newSubXp||50, completed:false }]}));
+    setNewSubName(''); setNewSubXp(50);
+  };
+  const removeSubFromNew = (id) => setNewQuest(p => ({...p, subQuests:p.subQuests.filter(s=>s.id!==id)}));
 
   const failQuest = (q) => {
     applyPenalty(q.xp, `Failed quest: ${q.name}`);
@@ -1970,10 +2025,38 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
     dispatch({ type:'DELETE_MAIN_QUEST', payload: q.id });
   };
 
+  const handleEditSave = (updates) => {
+    const { questType } = editQuest;
+    const typeMap = { daily:'UPDATE_DAILY_QUEST', weekly:'UPDATE_WEEKLY_QUEST', main:'UPDATE_MAIN_QUEST', side:'UPDATE_SIDE_QUEST' };
+    dispatch({ type: typeMap[questType], payload:{ id: editQuest.quest.id, updates } });
+    showNotif('✏ QUEST UPDATED');
+    setEditQuest(null);
+  };
+
+  const handleSubComplete = (questType, quest, subId) => {
+    dispatch({ type:'COMPLETE_SUB_QUEST', payload:{ questType, questId:quest.id, subId } });
+    const sub = (quest.subQuests||[]).find(s=>s.id===subId);
+    if (sub) {
+      addXP(sub.xp, 'quest');
+      sfx('questComplete');
+    }
+    // Check if all sub-quests done -> complete main quest
+    const subs = (quest.subQuests||[]);
+    const allDone = subs.every(s => s.id===subId || s.completed);
+    if (allDone) {
+      const typeMap = { daily:'COMPLETE_DAILY_QUEST', weekly:'COMPLETE_WEEKLY_QUEST', main:'COMPLETE_MAIN_QUEST' };
+      if (typeMap[questType]) {
+        dispatch({ type: typeMap[questType], payload: quest.id });
+        showNotif('✦ ALL SUB-QUESTS DONE — QUEST CLEARED!');
+      }
+    }
+  };
+
   const completeDaily = (q) => {
     if (q.completed) return;
     dispatch({ type:'COMPLETE_DAILY_QUEST', payload:q.id });
-    addXP(q.xp, 'quest');
+    const totalXP = (q.subQuests||[]).length > 0 ? (q.subQuests||[]).reduce((a,s)=>a+(s.xp||0),0) : q.xp;
+    addXP(totalXP, 'quest');
     sfx('questComplete');
     const msgs = ['QUEST CLEARED'];
     if (q.statReward) msgs.push(`+${q.statAmount||1} ${q.statReward.toUpperCase().slice(0,3)}`);
@@ -1983,14 +2066,16 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
   const completeWeekly = (q) => {
     if (q.completed) return;
     dispatch({ type:'COMPLETE_WEEKLY_QUEST', payload:q.id });
-    addXP(q.xp, 'quest');
+    const totalXP = (q.subQuests||[]).length > 0 ? (q.subQuests||[]).reduce((a,s)=>a+(s.xp||0),0) : q.xp;
+    addXP(totalXP, 'quest');
     sfx('questComplete');
     showNotif('WEEKLY QUEST CLEARED' + (q.statReward ? ` · +${q.statAmount||1} ${q.statReward.slice(0,3).toUpperCase()}` : ''));
   };
   const completeMain = (q) => {
     if (q.completed) return;
     dispatch({ type:'COMPLETE_MAIN_QUEST', payload:q.id });
-    addXP(q.xp, 'quest');
+    const totalXP = (q.subQuests||[]).length > 0 ? (q.subQuests||[]).reduce((a,s)=>a+(s.xp||0),0) : q.xp;
+    addXP(totalXP, 'quest');
     sfx('questComplete');
     showNotif('MAIN QUEST COMPLETE!' + (q.rewardId ? ' 🎁 REWARD EARNED' : ''));
   };
@@ -2067,7 +2152,7 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
               ⚡ Resets at midnight — Daily Dungeon
             </div>
             {state.quests.daily.map(q=>(
-              <QuestCard key={q.id} quest={q} completed={q.completed && q.date===today} onComplete={()=>completeDaily(q)} onDelete={()=>dispatch({type:'DELETE_DAILY_QUEST',payload:q.id})} onFail={()=>failQuest(q)} color="var(--mana)" customRewards={customRewards}/>
+              <QuestCard key={q.id} quest={q} completed={q.completed && q.date===today} onComplete={()=>completeDaily(q)} onDelete={()=>dispatch({type:'DELETE_DAILY_QUEST',payload:q.id})} onFail={()=>failQuest(q)} onEdit={()=>setEditQuest({quest:q,questType:'daily'})} onSubComplete={(subId)=>handleSubComplete('daily',q,subId)} color="var(--mana)" customRewards={customRewards} questType="daily" dispatch={dispatch} applyPenalty={applyPenalty}/>
             ))}
             <button className="btn-mana" onClick={()=>setShowAddDaily(true)} style={{ width:'100%', marginTop:8 }}>
               + ADD CUSTOM DAILY QUEST
@@ -2085,7 +2170,7 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
               </div>
             )}
             {state.quests.weekly.map(q=>(
-              <QuestCard key={q.id} quest={q} completed={q.completed} onComplete={()=>completeWeekly(q)} onDelete={()=>dispatch({type:'DELETE_WEEKLY_QUEST',payload:q.id})} onFail={()=>failWeekly(q)} color="var(--violet)" showProgress customRewards={customRewards}/>
+              <QuestCard key={q.id} quest={q} completed={q.completed} onComplete={()=>completeWeekly(q)} onDelete={()=>dispatch({type:'DELETE_WEEKLY_QUEST',payload:q.id})} onFail={()=>failWeekly(q)} onEdit={()=>setEditQuest({quest:q,questType:'weekly'})} onSubComplete={(subId)=>handleSubComplete('weekly',q,subId)} color="var(--violet)" showProgress customRewards={customRewards} questType="weekly" dispatch={dispatch} applyPenalty={applyPenalty}/>
             ))}
             <button className="btn-mana" onClick={()=>setShowAddWeekly(true)} style={{ width:'100%', marginTop:8, borderColor:'var(--violet)', color:'var(--violet)' }}>
               + ADD WEEKLY QUEST
@@ -2103,7 +2188,7 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
               </div>
             )}
             {state.quests.main.map(q=>(
-              <QuestCard key={q.id} quest={q} completed={q.completed} onComplete={()=>completeMain(q)} onDelete={()=>dispatch({type:'DELETE_MAIN_QUEST',payload:q.id})} onFail={()=>failMain(q)} color="var(--gold)" customRewards={customRewards}/>
+              <QuestCard key={q.id} quest={q} completed={q.completed} onComplete={()=>completeMain(q)} onDelete={()=>dispatch({type:'DELETE_MAIN_QUEST',payload:q.id})} onFail={()=>failMain(q)} onEdit={()=>setEditQuest({quest:q,questType:'main'})} onSubComplete={(subId)=>handleSubComplete('main',q,subId)} color="var(--gold)" customRewards={customRewards} questType="main" dispatch={dispatch} applyPenalty={applyPenalty}/>
             ))}
             <button className="btn-gold" onClick={()=>setShowAddMain(true)} style={{ width:'100%', marginTop:8 }}>
               + DEFINE MAIN QUEST
@@ -2192,17 +2277,19 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
 
       {showAddWeekly && (
         <div className="modal-overlay" onClick={()=>setShowAddWeekly(false)}>
-          <div className="modal-box" onClick={e=>e.stopPropagation()}>
+          <div className="modal-box" onClick={e=>e.stopPropagation()} style={{ maxHeight:'88vh', overflowY:'auto' }}>
             <div className="cinzel" style={{ color:'var(--violet)', fontSize:16, marginBottom:16 }}>📅 NEW WEEKLY QUEST</div>
             <div style={{ marginBottom:12 }}>
               <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>QUEST NAME *</label>
               <input className="input-dark" value={newQuest.name} onChange={e=>setNewQuest(p=>({...p,name:e.target.value}))} placeholder="Complete 5 workouts this week..."/>
             </div>
-            <div style={{ marginBottom:12 }}>
-              <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>XP REWARD</label>
-              <input className="input-dark" type="number" value={newQuest.xp} onChange={e=>setNewQuest(p=>({...p,xp:+e.target.value||300}))} placeholder="300"/>
-            </div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+            {newQuest.subQuests.length === 0 && (
+              <div style={{ marginBottom:12 }}>
+                <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>XP REWARD</label>
+                <input className="input-dark" type="number" value={newQuest.xp} onChange={e=>setNewQuest(p=>({...p,xp:+e.target.value||300}))} placeholder="300"/>
+              </div>
+            )}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
               <div>
                 <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>TARGET (times)</label>
                 <input className="input-dark" type="number" min={1} value={newQuest.target} onChange={e=>setNewQuest(p=>({...p,target:Math.max(1,+e.target.value||1)}))} placeholder="5"/>
@@ -2215,6 +2302,35 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
                 </select>
               </div>
             </div>
+            {/* Timer */}
+            <div style={{ marginBottom:12, padding:'10px 12px', border:'1px solid rgba(79,195,247,0.2)', borderRadius:8, background:'rgba(79,195,247,0.03)' }}>
+              <div style={{ fontSize:10, color:'var(--mana)', letterSpacing:2, marginBottom:8 }}>⏱ TIME LIMIT (optional)</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+                {[{l:'DAYS',k:'timerDays'},{l:'HRS',k:'timerHrs'},{l:'MINS',k:'timerMins'}].map(f=>(
+                  <div key={f.k}>
+                    <label style={{ display:'block', fontSize:9, color:'var(--text-dim)', marginBottom:4 }}>{f.l}</label>
+                    <input className="input-dark" type="number" min={0} value={newQuest[f.k]} onChange={e=>setNewQuest(p=>({...p,[f.k]:e.target.value}))} placeholder="0" style={{ padding:'7px 10px' }}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Sub-quests */}
+            <div style={{ marginBottom:12, padding:'10px 12px', border:'1px solid rgba(155,89,182,0.2)', borderRadius:8, background:'rgba(155,89,182,0.02)' }}>
+              <div style={{ fontSize:10, color:'var(--violet)', letterSpacing:2, marginBottom:8 }}>📋 SUB-QUESTS (optional)</div>
+              {newQuest.subQuests.map(s=>(
+                <div key={s.id} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5, padding:'5px 8px', background:'rgba(10,10,20,0.5)', borderRadius:5, border:'1px solid var(--border)' }}>
+                  <span style={{ flex:1, fontSize:11 }}>{s.name}</span>
+                  <span style={{ fontSize:10, color:'var(--gold)' }}>+{s.xp} XP</span>
+                  <button onClick={()=>removeSubFromNew(s.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(231,76,60,0.5)', display:'flex' }}><X size={11}/></button>
+                </div>
+              ))}
+              <div style={{ display:'flex', gap:6 }}>
+                <input className="input-dark" value={newSubName} onChange={e=>setNewSubName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addSubToNew()} placeholder="Sub-quest..." style={{ flex:3, padding:'7px 10px' }}/>
+                <input className="input-dark" type="number" min={1} value={newSubXp} onChange={e=>setNewSubXp(+e.target.value||50)} placeholder="XP" style={{ flex:1, padding:'7px 8px' }}/>
+                <button onClick={addSubToNew} style={{ padding:'7px 12px', borderRadius:6, cursor:'pointer', background:'rgba(155,89,182,0.2)', border:'1px solid var(--violet)', color:'var(--violet)', fontSize:14 }}>+</button>
+              </div>
+              {newQuest.subQuests.length > 0 && <div style={{ marginTop:6, fontSize:10, color:'var(--gold)' }}>Total: <span className="cinzel">{newQuest.subQuests.reduce((a,s)=>a+(s.xp||0),0)} XP</span></div>}
+            </div>
             <div style={{ display:'flex', gap:8 }}>
               <button style={{
                 flex:1, padding:'11px', borderRadius:6, cursor:'pointer',
@@ -2222,11 +2338,14 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
                 color:'var(--violet)', fontFamily:'Cinzel,serif', fontSize:12, letterSpacing:1
               }} onClick={()=>{
                 if(!newQuest.name.trim()) return;
+                const deadline = calcDeadline(newQuest);
+                const subQuests = newQuest.subQuests;
+                const totalXP = subQuests.length > 0 ? subQuests.reduce((a,s)=>a+(s.xp||0),0) : +newQuest.xp||300;
                 dispatch({type:'ADD_WEEKLY_QUEST', payload:{
-                  name:newQuest.name.trim(), xp:+newQuest.xp||300,
-                  target:+newQuest.target||1, statReward:newQuest.statReward, statAmount:+newQuest.statAmount||1
+                  name:newQuest.name.trim(), xp:totalXP,
+                  target:+newQuest.target||1, statReward:newQuest.statReward, statAmount:+newQuest.statAmount||1, subQuests, deadline
                 }});
-                setNewQuest({name:'',xp:100,target:1,desc:'',statReward:'',statAmount:1,rewardId:''});
+                setNewQuest({name:'',xp:100,target:1,desc:'',statReward:'',statAmount:1,rewardId:'',timerDays:'',timerHrs:'',timerMins:'',subQuests:[]});
                 setShowAddWeekly(false);
                 showNotif('📅 WEEKLY QUEST ADDED');
               }}>CREATE QUEST</button>
@@ -2238,22 +2357,59 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
 
       {showAddMain && (
         <div className="modal-overlay" onClick={()=>setShowAddMain(false)}>
-          <div className="modal-box" onClick={e=>e.stopPropagation()}>
+          <div className="modal-box" onClick={e=>e.stopPropagation()} style={{ maxHeight:'88vh', overflowY:'auto' }}>
             <div className="cinzel" style={{ color:'var(--gold)', fontSize:16, marginBottom:16 }}>NEW MAIN QUEST</div>
             {[{k:'name',label:'Quest Name',ph:'Reach 75kg bodyweight...'},
-              {k:'desc',label:'Description (optional)',ph:'Sub-objectives...'},
-              {k:'xp',label:'XP Reward',ph:'500'}].map(f=>(
+              {k:'desc',label:'Description (optional)',ph:'Sub-objectives...'}].map(f=>(
               <div key={f.k} style={{ marginBottom:12 }}>
                 <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>{f.label}</label>
                 <input className="input-dark" value={newQuest[f.k]} onChange={e=>setNewQuest(p=>({...p,[f.k]:e.target.value}))} placeholder={f.ph}/>
               </div>
             ))}
+            {newQuest.subQuests.length === 0 && (
+              <div style={{ marginBottom:12 }}>
+                <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>XP REWARD</label>
+                <input className="input-dark" value={newQuest.xp} onChange={e=>setNewQuest(p=>({...p,xp:e.target.value}))} placeholder="500"/>
+              </div>
+            )}
+            {/* Timer */}
+            <div style={{ marginBottom:12, padding:'10px 12px', border:'1px solid rgba(79,195,247,0.2)', borderRadius:8, background:'rgba(79,195,247,0.03)' }}>
+              <div style={{ fontSize:10, color:'var(--mana)', letterSpacing:2, marginBottom:8 }}>⏱ TIME LIMIT (optional)</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+                {[{l:'DAYS',k:'timerDays'},{l:'HRS',k:'timerHrs'},{l:'MINS',k:'timerMins'}].map(f=>(
+                  <div key={f.k}>
+                    <label style={{ display:'block', fontSize:9, color:'var(--text-dim)', marginBottom:4 }}>{f.l}</label>
+                    <input className="input-dark" type="number" min={0} value={newQuest[f.k]} onChange={e=>setNewQuest(p=>({...p,[f.k]:e.target.value}))} placeholder="0" style={{ padding:'7px 10px' }}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Sub-quests */}
+            <div style={{ marginBottom:12, padding:'10px 12px', border:'1px solid rgba(155,89,182,0.2)', borderRadius:8, background:'rgba(155,89,182,0.02)' }}>
+              <div style={{ fontSize:10, color:'var(--violet)', letterSpacing:2, marginBottom:8 }}>📋 SUB-QUESTS (optional)</div>
+              {newQuest.subQuests.map(s=>(
+                <div key={s.id} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5, padding:'5px 8px', background:'rgba(10,10,20,0.5)', borderRadius:5, border:'1px solid var(--border)' }}>
+                  <span style={{ flex:1, fontSize:11 }}>{s.name}</span>
+                  <span style={{ fontSize:10, color:'var(--gold)' }}>+{s.xp} XP</span>
+                  <button onClick={()=>removeSubFromNew(s.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(231,76,60,0.5)', display:'flex' }}><X size={11}/></button>
+                </div>
+              ))}
+              <div style={{ display:'flex', gap:6 }}>
+                <input className="input-dark" value={newSubName} onChange={e=>setNewSubName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addSubToNew()} placeholder="Sub-quest..." style={{ flex:3, padding:'7px 10px' }}/>
+                <input className="input-dark" type="number" min={1} value={newSubXp} onChange={e=>setNewSubXp(+e.target.value||50)} placeholder="XP" style={{ flex:1, padding:'7px 8px' }}/>
+                <button onClick={addSubToNew} style={{ padding:'7px 12px', borderRadius:6, cursor:'pointer', background:'rgba(155,89,182,0.2)', border:'1px solid var(--violet)', color:'var(--violet)', fontSize:14 }}>+</button>
+              </div>
+              {newQuest.subQuests.length > 0 && <div style={{ marginTop:6, fontSize:10, color:'var(--gold)' }}>Total: <span className="cinzel">{newQuest.subQuests.reduce((a,s)=>a+(s.xp||0),0)} XP</span></div>}
+            </div>
             <QuestExtrasForm/>
             <div style={{ display:'flex', gap:8, marginTop:8 }}>
               <button className="btn-mana" style={{ flex:1 }} onClick={()=>{
                 if(!newQuest.name) return;
-                dispatch({type:'ADD_MAIN_QUEST', payload:{name:newQuest.name, desc:newQuest.desc, xp:+newQuest.xp||100, statReward:newQuest.statReward, statAmount:+newQuest.statAmount||1, rewardId:newQuest.rewardId}});
-                setNewQuest({name:'',xp:100,target:1,desc:'',statReward:'',statAmount:1,rewardId:''});
+                const deadline = calcDeadline(newQuest);
+                const subQuests = newQuest.subQuests;
+                const totalXP = subQuests.length > 0 ? subQuests.reduce((a,s)=>a+(s.xp||0),0) : +newQuest.xp||100;
+                dispatch({type:'ADD_MAIN_QUEST', payload:{name:newQuest.name, desc:newQuest.desc, xp:totalXP, statReward:newQuest.statReward, statAmount:+newQuest.statAmount||1, rewardId:newQuest.rewardId, subQuests, deadline}});
+                setNewQuest({name:'',xp:100,target:1,desc:'',statReward:'',statAmount:1,rewardId:'',timerDays:'',timerHrs:'',timerMins:'',subQuests:[]});
                 setShowAddMain(false);
               }}>CREATE QUEST</button>
               <button className="btn-danger" onClick={()=>setShowAddMain(false)}>CANCEL</button>
@@ -2264,20 +2420,58 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
 
       {showAddDaily && (
         <div className="modal-overlay" onClick={()=>setShowAddDaily(false)}>
-          <div className="modal-box" onClick={e=>e.stopPropagation()}>
+          <div className="modal-box" onClick={e=>e.stopPropagation()} style={{ maxHeight:'88vh', overflowY:'auto' }}>
             <div className="cinzel" style={{ color:'var(--mana)', fontSize:16, marginBottom:16 }}>CUSTOM DAILY QUEST</div>
-            {[{k:'name',label:'Quest Name',ph:'Meditate for 10 minutes...'},{k:'xp',label:'XP Reward',ph:'50'}].map(f=>(
+            {[{k:'name',label:'Quest Name',ph:'Meditate for 10 minutes...'}].map(f=>(
               <div key={f.k} style={{ marginBottom:12 }}>
                 <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>{f.label}</label>
                 <input className="input-dark" value={newQuest[f.k]} onChange={e=>setNewQuest(p=>({...p,[f.k]:e.target.value}))} placeholder={f.ph}/>
               </div>
             ))}
+            {newQuest.subQuests.length === 0 && (
+              <div style={{ marginBottom:12 }}>
+                <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>XP REWARD</label>
+                <input className="input-dark" type="number" value={newQuest.xp} onChange={e=>setNewQuest(p=>({...p,xp:+e.target.value||50}))} placeholder="50"/>
+              </div>
+            )}
+            {/* Timer */}
+            <div style={{ marginBottom:12, padding:'10px 12px', border:'1px solid rgba(79,195,247,0.2)', borderRadius:8, background:'rgba(79,195,247,0.03)' }}>
+              <div style={{ fontSize:10, color:'var(--mana)', letterSpacing:2, marginBottom:8 }}>⏱ TIME LIMIT (optional)</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+                {[{l:'DAYS',k:'timerDays'},{l:'HRS',k:'timerHrs'},{l:'MINS',k:'timerMins'}].map(f=>(
+                  <div key={f.k}>
+                    <label style={{ display:'block', fontSize:9, color:'var(--text-dim)', marginBottom:4 }}>{f.l}</label>
+                    <input className="input-dark" type="number" min={0} value={newQuest[f.k]} onChange={e=>setNewQuest(p=>({...p,[f.k]:e.target.value}))} placeholder="0" style={{ padding:'7px 10px' }}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Sub-quests */}
+            <div style={{ marginBottom:12, padding:'10px 12px', border:'1px solid rgba(155,89,182,0.2)', borderRadius:8, background:'rgba(155,89,182,0.02)' }}>
+              <div style={{ fontSize:10, color:'var(--violet)', letterSpacing:2, marginBottom:8 }}>📋 SUB-QUESTS (optional)</div>
+              {newQuest.subQuests.map(s=>(
+                <div key={s.id} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5, padding:'5px 8px', background:'rgba(10,10,20,0.5)', borderRadius:5, border:'1px solid var(--border)' }}>
+                  <span style={{ flex:1, fontSize:11 }}>{s.name}</span>
+                  <span style={{ fontSize:10, color:'var(--gold)' }}>+{s.xp} XP</span>
+                  <button onClick={()=>removeSubFromNew(s.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(231,76,60,0.5)', display:'flex' }}><X size={11}/></button>
+                </div>
+              ))}
+              <div style={{ display:'flex', gap:6 }}>
+                <input className="input-dark" value={newSubName} onChange={e=>setNewSubName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addSubToNew()} placeholder="Sub-quest..." style={{ flex:3, padding:'7px 10px' }}/>
+                <input className="input-dark" type="number" min={1} value={newSubXp} onChange={e=>setNewSubXp(+e.target.value||50)} placeholder="XP" style={{ flex:1, padding:'7px 8px' }}/>
+                <button onClick={addSubToNew} style={{ padding:'7px 12px', borderRadius:6, cursor:'pointer', background:'rgba(155,89,182,0.2)', border:'1px solid var(--violet)', color:'var(--violet)', fontSize:14 }}>+</button>
+              </div>
+              {newQuest.subQuests.length > 0 && <div style={{ marginTop:6, fontSize:10, color:'var(--gold)' }}>Total: <span className="cinzel">{newQuest.subQuests.reduce((a,s)=>a+(s.xp||0),0)} XP</span></div>}
+            </div>
             <QuestExtrasForm/>
             <div style={{ display:'flex', gap:8, marginTop:8 }}>
               <button className="btn-mana" style={{ flex:1 }} onClick={()=>{
                 if(!newQuest.name) return;
-                dispatch({type:'ADD_DAILY_QUEST', payload:{name:newQuest.name, xp:+newQuest.xp||50, category:'custom', statReward:newQuest.statReward, statAmount:+newQuest.statAmount||1, rewardId:newQuest.rewardId}});
-                setNewQuest({name:'',xp:50,target:1,desc:'',statReward:'',statAmount:1,rewardId:''});
+                const deadline = calcDeadline(newQuest);
+                const subQuests = newQuest.subQuests;
+                const totalXP = subQuests.length > 0 ? subQuests.reduce((a,s)=>a+(s.xp||0),0) : +newQuest.xp||50;
+                dispatch({type:'ADD_DAILY_QUEST', payload:{name:newQuest.name, xp:totalXP, category:'custom', statReward:newQuest.statReward, statAmount:+newQuest.statAmount||1, rewardId:newQuest.rewardId, subQuests, deadline}});
+                setNewQuest({name:'',xp:50,target:1,desc:'',statReward:'',statAmount:1,rewardId:'',timerDays:'',timerHrs:'',timerMins:'',subQuests:[]});
                 setShowAddDaily(false);
               }}>ADD QUEST</button>
               <button className="btn-danger" onClick={()=>setShowAddDaily(false)}>CANCEL</button>
@@ -2371,37 +2565,105 @@ function QuestsScreen({ state, dispatch, addXP, showNotif, sfx, applyPenalty }) 
           </div>
         </div>
       )}
+
+      {/* Edit Quest Modal */}
+      {editQuest && (
+        <EditQuestModal
+          quest={editQuest.quest}
+          questType={editQuest.questType}
+          onSave={handleEditSave}
+          onClose={()=>setEditQuest(null)}
+          state={state}
+        />
+      )}
     </div>
   );
 }
 
-function QuestCard({ quest, completed, onComplete, onDelete, onFail, color, showProgress, customRewards }) {
+function useCountdown(targetMs) {
+  const [timeLeft, setTimeLeft] = useState(targetMs ? Math.max(0, targetMs - Date.now()) : null);
+  useEffect(() => {
+    if (!targetMs) return;
+    const tick = () => setTimeLeft(Math.max(0, targetMs - Date.now()));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [targetMs]);
+  return timeLeft;
+}
+
+function formatCountdown(ms) {
+  if (ms === null) return null;
+  if (ms <= 0) return '00:00:00:00';
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return `${String(d).padStart(2,'0')}d ${String(h).padStart(2,'0')}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`;
+}
+
+function QuestCard({ quest, completed, onComplete, onDelete, onFail, onEdit, onSubComplete, color, showProgress, customRewards, questType, dispatch, applyPenalty }) {
   const linkedReward = customRewards && quest.rewardId ? customRewards.find(r=>r.id===quest.rewardId) : null;
+  const subQuests = quest.subQuests || [];
+  const hasSubQuests = subQuests.length > 0;
+  const subDone = subQuests.filter(s=>s.completed).length;
+  const subTotal = subQuests.length;
+  const subPct = subTotal > 0 ? (subDone / subTotal) * 100 : 0;
+  const totalXP = hasSubQuests ? subQuests.reduce((a,s) => a + (s.xp||0), 0) : quest.xp;
+  const [showSubs, setShowSubs] = useState(false);
+
+  const timeLeft = useCountdown(quest.deadline || null);
+  const isExpired = quest.deadline && timeLeft === 0;
+  const isFailed = quest.failed || quest.timedOut;
+
+  // Auto-fail when deadline expires
+  useEffect(() => {
+    if (isExpired && !completed && !isFailed && questType && dispatch && applyPenalty) {
+      dispatch({ type:'FAIL_TIMED_QUEST', payload:{ questType, questId:quest.id } });
+      applyPenalty(totalXP, `Timed out: ${quest.name}`);
+    }
+  }, [isExpired]);
+
+  const urgentColor = timeLeft !== null && timeLeft < 3600000 ? 'var(--crimson)' : timeLeft !== null && timeLeft < 86400000 ? 'var(--gold)' : color;
+
   return (
     <div className="panel" style={{
-      padding:14, marginBottom:10, borderColor: completed ? 'rgba(79,195,247,0.1)' : `${color}33`,
-      opacity: completed ? 0.6 : 1, transition:'all 0.3s'
+      padding:14, marginBottom:10,
+      borderColor: isFailed ? 'rgba(231,76,60,0.4)' : completed ? 'rgba(79,195,247,0.1)' : `${urgentColor}33`,
+      opacity: completed || isFailed ? 0.6 : 1, transition:'all 0.3s',
+      background: isFailed ? 'rgba(231,76,60,0.04)' : 'var(--card)'
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-        <button onClick={onComplete} disabled={completed} style={{
-          width:28, height:28, borderRadius:6, flexShrink:0, cursor: completed ? 'default' : 'pointer',
-          border: completed ? 'none' : `1px solid ${color}`,
-          background: completed ? color : 'transparent',
+        <button onClick={completed || isFailed ? undefined : onComplete} disabled={completed || isFailed} style={{
+          width:28, height:28, borderRadius:6, flexShrink:0, cursor: completed || isFailed ? 'default' : 'pointer',
+          border: completed ? 'none' : isFailed ? '1px solid var(--crimson)' : `1px solid ${color}`,
+          background: completed ? color : isFailed ? 'rgba(231,76,60,0.2)' : 'transparent',
           display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.2s',
-          boxShadow: completed ? 'none' : `0 0 10px ${color}44`
+          boxShadow: completed || isFailed ? 'none' : `0 0 10px ${color}44`, fontSize:12
         }}>
           {completed && <Check size={14} color="#000"/>}
+          {isFailed && <span style={{color:'var(--crimson)'}}>✕</span>}
         </button>
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:13, color: completed ? 'var(--text-dim)' : 'var(--text)', textDecoration: completed ? 'line-through' : 'none' }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:13, color: completed||isFailed ? 'var(--text-dim)' : 'var(--text)', textDecoration: completed||isFailed ? 'line-through' : 'none' }}>
             {quest.name}
           </div>
           {quest.desc && <div style={{ fontSize:11, color:'var(--text-dim)', marginTop:2 }}>{quest.desc}</div>}
+          {/* Timer countdown */}
+          {quest.deadline && !completed && !isFailed && (
+            <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:5 }}>
+              <span style={{ fontSize:9, color: urgentColor === 'var(--crimson)' ? 'var(--crimson)' : urgentColor === 'var(--gold)' ? 'var(--gold)' : 'var(--text-dim)', fontFamily:'Courier New', letterSpacing:1 }}>
+                ⏱ {timeLeft !== null ? formatCountdown(timeLeft) : ''}
+              </span>
+            </div>
+          )}
+          {isFailed && <div style={{ fontSize:10, color:'var(--crimson)', marginTop:2 }}>⚠ QUEST FAILED — TIME EXPIRED</div>}
           {/* Rewards row */}
           <div style={{ display:'flex', gap:6, marginTop:4, flexWrap:'wrap' }}>
-            {quest.statReward && (
-              <span style={{ fontSize:9, color:getStatColor(quest.statReward,statDefs), border:`1px solid ${getStatColor(quest.statReward,statDefs)}44`, borderRadius:3, padding:'1px 5px', letterSpacing:1 }}>
-                +{quest.statAmount||1} {getStatAbbr(quest.statReward,statDefs)}
+            {quest.statReward && !hasSubQuests && (
+              <span style={{ fontSize:9, color:getStatColor(quest.statReward,null), border:`1px solid ${getStatColor(quest.statReward,null)}44`, borderRadius:3, padding:'1px 5px', letterSpacing:1 }}>
+                +{quest.statAmount||1} {getStatAbbr(quest.statReward,null)}
               </span>
             )}
             {linkedReward && (
@@ -2411,28 +2673,83 @@ function QuestCard({ quest, completed, onComplete, onDelete, onFail, color, show
             )}
           </div>
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
-          <div className="cinzel" style={{ fontSize:12, color:'var(--gold)' }}>+{quest.xp} XP</div>
-          {onFail && !completed && (
-            <button onClick={e=>{ e.stopPropagation(); onFail(); }} style={{
-              background:'rgba(231,76,60,0.15)', border:'1px solid rgba(231,76,60,0.5)', borderRadius:4,
-              color:'var(--crimson)', fontSize:9, padding:'3px 7px', cursor:'pointer',
-              fontFamily:'Cinzel,serif', letterSpacing:1
-            }}>FAIL</button>
-          )}
-          {onDelete && (
-            <button onClick={e=>{ e.stopPropagation(); onDelete(); }} style={{
-              background:'none', border:'none', cursor:'pointer', color:'rgba(231,76,60,0.4)',
-              padding:2, display:'flex', alignItems:'center', transition:'color 0.2s'
-            }}
-              onMouseEnter={e=>e.currentTarget.style.color='var(--crimson)'}
-              onMouseLeave={e=>e.currentTarget.style.color='rgba(231,76,60,0.4)'}>
-              <Trash2 size={13}/>
-            </button>
-          )}
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4, flexShrink:0 }}>
+          <div className="cinzel" style={{ fontSize:12, color:'var(--gold)' }}>+{totalXP} XP</div>
+          <div style={{ display:'flex', gap:4 }}>
+            {onEdit && !completed && !isFailed && (
+              <button onClick={e=>{ e.stopPropagation(); onEdit(); }} style={{
+                background:'rgba(79,195,247,0.1)', border:'1px solid rgba(79,195,247,0.3)', borderRadius:4,
+                color:'var(--mana)', fontSize:9, padding:'3px 6px', cursor:'pointer', display:'flex', alignItems:'center', gap:2
+              }}>
+                <Edit3 size={10}/>
+              </button>
+            )}
+            {onFail && !completed && !isFailed && (
+              <button onClick={e=>{ e.stopPropagation(); onFail(); }} style={{
+                background:'rgba(231,76,60,0.15)', border:'1px solid rgba(231,76,60,0.5)', borderRadius:4,
+                color:'var(--crimson)', fontSize:9, padding:'3px 7px', cursor:'pointer',
+                fontFamily:'Cinzel,serif', letterSpacing:1
+              }}>FAIL</button>
+            )}
+            {onDelete && (
+              <button onClick={e=>{ e.stopPropagation(); onDelete(); }} style={{
+                background:'none', border:'none', cursor:'pointer', color:'rgba(231,76,60,0.4)',
+                padding:2, display:'flex', alignItems:'center', transition:'color 0.2s'
+              }}
+                onMouseEnter={e=>e.currentTarget.style.color='var(--crimson)'}
+                onMouseLeave={e=>e.currentTarget.style.color='rgba(231,76,60,0.4)'}>
+                <Trash2 size={13}/>
+              </button>
+            )}
+          </div>
         </div>
       </div>
-      {showProgress && quest.target > 1 && (
+
+      {/* Sub-quests section */}
+      {hasSubQuests && (
+        <div style={{ marginTop:10 }}>
+          <div style={{ marginBottom:6 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+              <button onClick={()=>setShowSubs(p=>!p)} style={{
+                background:'none', border:'none', cursor:'pointer', color:'var(--text-dim)', fontSize:10,
+                display:'flex', alignItems:'center', gap:4, padding:0, fontFamily:'Courier New'
+              }}>
+                {showSubs ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
+                SUB-QUESTS ({subDone}/{subTotal})
+              </button>
+              <span style={{ fontSize:10, color:'var(--gold)', fontFamily:'Cinzel,serif' }}>+{totalXP} XP total</span>
+            </div>
+            <div className="xp-bar-track" style={{ height:6 }}>
+              <div className="xp-bar-fill" style={{ width:`${subPct}%`, background:`linear-gradient(90deg, ${color}66, ${color})` }}/>
+            </div>
+          </div>
+          {showSubs && (
+            <div style={{ marginTop:8, paddingLeft:10, borderLeft:`2px solid ${color}33` }}>
+              {subQuests.map(s => (
+                <div key={s.id} style={{
+                  display:'flex', alignItems:'center', gap:8, padding:'6px 8px', marginBottom:4,
+                  borderRadius:6, background: s.completed ? 'rgba(79,195,247,0.05)' : 'rgba(10,10,20,0.4)',
+                  border:'1px solid rgba(79,195,247,0.08)'
+                }}>
+                  <button onClick={()=>{ if(!s.completed && onSubComplete) onSubComplete(s.id); }} disabled={s.completed||completed||isFailed} style={{
+                    width:20, height:20, borderRadius:4, flexShrink:0, cursor: s.completed||completed||isFailed ? 'default' : 'pointer',
+                    border: s.completed ? 'none' : `1px solid ${color}88`,
+                    background: s.completed ? color : 'transparent',
+                    display:'flex', alignItems:'center', justifyContent:'center', fontSize:10
+                  }}>
+                    {s.completed && <Check size={11} color="#000"/>}
+                  </button>
+                  <span style={{ flex:1, fontSize:12, color: s.completed ? 'var(--text-dim)' : 'var(--text)', textDecoration: s.completed ? 'line-through' : 'none' }}>{s.name}</span>
+                  <span className="cinzel" style={{ fontSize:10, color:'var(--gold)', flexShrink:0 }}>+{s.xp} XP</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Progress bar for weekly quests without sub-quests */}
+      {showProgress && !hasSubQuests && quest.target > 1 && (
         <div style={{ marginTop:10 }}>
           <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--text-dim)', marginBottom:4 }}>
             <span>Progress</span><span>{quest.progress||0}/{quest.target}</span>
@@ -2442,6 +2759,148 @@ function QuestCard({ quest, completed, onComplete, onDelete, onFail, color, show
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EDIT QUEST MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+function EditQuestModal({ quest, questType, onSave, onClose, state }) {
+  const [name, setName] = useState(quest.name || '');
+  const [desc, setDesc] = useState(quest.desc || '');
+  const [xp, setXp] = useState(quest.xp || 100);
+  const [days, setDays] = useState('');
+  const [hrs, setHrs] = useState('');
+  const [mins, setMins] = useState('');
+  const [subQuests, setSubQuests] = useState(quest.subQuests || []);
+  const [newSubName, setNewSubName] = useState('');
+  const [newSubXp, setNewSubXp] = useState(50);
+
+  // Pre-fill timer from existing deadline
+  useEffect(() => {
+    if (quest.deadline) {
+      const ms = Math.max(0, quest.deadline - Date.now());
+      const totalSecs = Math.floor(ms / 1000);
+      setDays(String(Math.floor(totalSecs / 86400)));
+      setHrs(String(Math.floor((totalSecs % 86400) / 3600)));
+      setMins(String(Math.floor((totalSecs % 3600) / 60)));
+    }
+  }, []);
+
+  const totalXP = subQuests.length > 0 ? subQuests.reduce((a,s)=>a+(s.xp||0),0) : +xp||100;
+
+  const addSub = () => {
+    if (!newSubName.trim()) return;
+    setSubQuests(p => [...p, { id:'sub_'+Date.now(), name:newSubName.trim(), xp:+newSubXp||50, completed:false }]);
+    setNewSubName('');
+    setNewSubXp(50);
+  };
+
+  const removeSub = (id) => setSubQuests(p => p.filter(s=>s.id!==id));
+
+  const calcDeadline = () => {
+    const d = +days||0, h = +hrs||0, m = +mins||0;
+    if (d+h+m === 0) return null;
+    return Date.now() + (d*86400 + h*3600 + m*60) * 1000;
+  };
+
+  const save = () => {
+    if (!name.trim()) return;
+    const deadline = calcDeadline();
+    const updates = {
+      name: name.trim(), desc: desc.trim(),
+      xp: subQuests.length > 0 ? totalXP : +xp||100,
+      subQuests, deadline, failed: false, timedOut: false
+    };
+    onSave(updates);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()} style={{ maxHeight:'88vh', overflowY:'auto' }}>
+        <div className="cinzel" style={{ color:'var(--mana)', fontSize:16, marginBottom:16 }}>✏ EDIT QUEST</div>
+
+        <div style={{ marginBottom:12 }}>
+          <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>QUEST NAME *</label>
+          <input className="input-dark" value={name} onChange={e=>setName(e.target.value)} placeholder="Quest name..."/>
+        </div>
+
+        <div style={{ marginBottom:12 }}>
+          <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>DESCRIPTION</label>
+          <input className="input-dark" value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Optional description..."/>
+        </div>
+
+        {subQuests.length === 0 && (
+          <div style={{ marginBottom:12 }}>
+            <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:6 }}>XP REWARD</label>
+            <input className="input-dark" type="number" min={1} value={xp} onChange={e=>setXp(+e.target.value||1)} placeholder="100"/>
+          </div>
+        )}
+
+        {/* Timer section */}
+        <div style={{ marginBottom:16, padding:'12px 14px', border:'1px solid rgba(79,195,247,0.2)', borderRadius:8, background:'rgba(79,195,247,0.03)' }}>
+          <div style={{ fontSize:11, color:'var(--mana)', letterSpacing:2, marginBottom:10 }}>⏱ QUEST DEADLINE (optional)</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+            {[{label:'DAYS',val:days,set:setDays},{label:'HOURS',val:hrs,set:setHrs},{label:'MINS',val:mins,set:setMins}].map(f=>(
+              <div key={f.label}>
+                <label style={{ display:'block', fontSize:9, color:'var(--text-dim)', marginBottom:4, letterSpacing:1 }}>{f.label}</label>
+                <input className="input-dark" type="number" min={0} value={f.val} onChange={e=>f.set(e.target.value)} placeholder="0" style={{ padding:'8px 10px' }}/>
+              </div>
+            ))}
+          </div>
+          {(+days||0)+(+hrs||0)+(+mins||0) > 0 && (
+            <div style={{ marginTop:8, fontSize:10, color:'var(--mana)', letterSpacing:1 }}>
+              ⚠ Quest auto-fails if not completed in time. Penalty applied.
+            </div>
+          )}
+          {quest.deadline && (
+            <button onClick={()=>{setDays('');setHrs('');setMins('');}} style={{
+              marginTop:8, background:'none', border:'1px solid rgba(231,76,60,0.3)', borderRadius:4,
+              color:'var(--crimson)', fontSize:10, padding:'4px 8px', cursor:'pointer'
+            }}>CLEAR DEADLINE</button>
+          )}
+        </div>
+
+        {/* Sub-quests section */}
+        <div style={{ marginBottom:16, padding:'12px 14px', border:'1px solid rgba(155,89,182,0.25)', borderRadius:8, background:'rgba(155,89,182,0.03)' }}>
+          <div style={{ fontSize:11, color:'var(--violet)', letterSpacing:2, marginBottom:10 }}>📋 SUB-QUESTS</div>
+
+          {subQuests.map(s => (
+            <div key={s.id} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6, padding:'6px 10px', background:'rgba(10,10,20,0.5)', borderRadius:6, border:'1px solid var(--border)' }}>
+              <span style={{ flex:1, fontSize:12, color: s.completed ? 'var(--text-dim)' : 'var(--text)', textDecoration: s.completed ? 'line-through' : 'none' }}>{s.name}</span>
+              <span className="cinzel" style={{ fontSize:10, color:'var(--gold)' }}>+{s.xp} XP</span>
+              {!s.completed && (
+                <button onClick={()=>removeSub(s.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(231,76,60,0.5)', padding:2, display:'flex' }}>
+                  <X size={12}/>
+                </button>
+              )}
+            </div>
+          ))}
+
+          <div style={{ display:'flex', gap:8, marginTop:8 }}>
+            <input className="input-dark" value={newSubName} onChange={e=>setNewSubName(e.target.value)}
+              onKeyDown={e=>e.key==='Enter'&&addSub()}
+              placeholder="Sub-quest name..." style={{ flex:3 }}/>
+            <input className="input-dark" type="number" min={1} value={newSubXp} onChange={e=>setNewSubXp(+e.target.value||50)}
+              placeholder="XP" style={{ flex:1, padding:'8px 10px' }}/>
+            <button onClick={addSub} style={{
+              padding:'8px 12px', borderRadius:6, cursor:'pointer', flexShrink:0,
+              background:'rgba(155,89,182,0.2)', border:'1px solid var(--violet)', color:'var(--violet)', fontSize:14
+            }}>+</button>
+          </div>
+          {subQuests.length > 0 && (
+            <div style={{ marginTop:8, fontSize:11, color:'var(--gold)' }}>
+              Total XP: <span className="cinzel">{subQuests.reduce((a,s)=>a+(s.xp||0),0)}</span>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display:'flex', gap:8 }}>
+          <button className="btn-mana" style={{ flex:1 }} onClick={save}>SAVE CHANGES</button>
+          <button className="btn-danger" onClick={onClose}>CANCEL</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3537,7 +3996,7 @@ function RewardsScreen({ state, dispatch, addXP, showNotif, sfx }) {
             <span style={{ fontSize:10, color:'var(--text-dim)' }}>COINS</span>
           </div>
         </div>
-        <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:12 }}>Earn 1 coin per 50 XP gained. Spend wisely, Hunter.</div>
+        <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:12 }}>Earn 1 coin per 1000 XP gained. Spend wisely, Hunter.</div>
         <div style={{ display:'flex', gap:6, marginBottom:12, overflowX:'auto', paddingBottom:4 }}>
           {CATS.map(c=>(
             <button key={c} onClick={()=>setCat(c)} style={{ padding:'6px 12px', fontSize:10, borderRadius:6, cursor:'pointer', whiteSpace:'nowrap', border:cat===c?'1px solid var(--mana)':'1px solid var(--border)', background:cat===c?'rgba(79,195,247,0.15)':'rgba(10,10,20,0.6)', color:cat===c?'var(--mana)':'var(--text-dim)', fontFamily:'Cinzel,serif' }}>{c.toUpperCase()}</button>

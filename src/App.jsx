@@ -214,15 +214,15 @@ body { background: var(--bg); color: var(--text); font-family: 'Courier New', mo
 }
 
 .xp-bar-track {
-  background: rgba(79,195,247,0.08);
-  border: 1px solid rgba(79,195,247,0.2);
+  background: rgba(243,156,18,0.08);
+  border: 1px solid rgba(243,156,18,0.22);
   border-radius: 4px; height: 10px; overflow: hidden;
 }
 .xp-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #1565C0, var(--mana), #80DEEA);
+  background: linear-gradient(90deg, #b8860b, #F39C12, #FFD700);
   border-radius: 4px;
-  box-shadow: 0 0 8px rgba(79,195,247,0.6);
+  box-shadow: 0 0 8px rgba(243,156,18,0.7), 0 0 16px rgba(255,215,0,0.3);
   transition: width 1s ease-out;
 }
 
@@ -1186,7 +1186,7 @@ function StatBar({ label, abbr, value, color }) {
 }
 
 // ─── XP BAR ──────────────────────────────────────────────────────────────────
-function XPBar({ current, needed }) {
+function XPBar({ current, needed, blue }) {
   const pct = needed > 0 ? Math.min(100, (current/needed)*100) : 0;
   return (
     <div>
@@ -1194,8 +1194,8 @@ function XPBar({ current, needed }) {
         <span>{current.toLocaleString()} XP</span>
         <span>{needed.toLocaleString()} XP</span>
       </div>
-      <div className="xp-bar-track" style={{ height:14 }}>
-        <div className="xp-bar-fill" style={{ width:`${pct}%` }}/>
+      <div className="xp-bar-track" style={{ height:14, ...(blue ? { background:'rgba(79,195,247,0.08)', border:'1px solid rgba(79,195,247,0.2)' } : {}) }}>
+        <div className="xp-bar-fill" style={{ width:`${pct}%`, ...(blue ? { background:'linear-gradient(90deg,#1565C0,#4FC3F7,#80DEEA)', boxShadow:'0 0 8px rgba(79,195,247,0.6)' } : {}) }}/>
       </div>
     </div>
   );
@@ -1768,13 +1768,13 @@ function StatusScreen({ state, dispatch, addXP }) {
             <div style={{ fontSize:11, color:'var(--text-dim)' }}>LEVEL</div>
           </div>
         </div>
-        <XPBar current={hunter.totalXP} needed={hunter.xpToNextLevel}/>
+        <XPBar current={hunter.totalXP} needed={hunter.xpToNextLevel} blue/>
         {/* HP Mini Bar */}
         {(() => {
           const maxHp = hunter.maxHp || RANK_MAX_HP[hunter.rank] || 100;
           const hp = hunter.hp ?? maxHp;
           const pct = Math.max(0, Math.min(100, (hp/maxHp)*100));
-          const col = pct > 60 ? '#2ECC71' : pct > 30 ? '#F39C12' : '#E74C3C';
+          const col = '#E74C3C';
           return (
             <div style={{ marginTop:8 }}>
               <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
@@ -1799,7 +1799,7 @@ function StatusScreen({ state, dispatch, addXP }) {
             <div style={{ fontSize:9, color:'var(--text-dim)' }}>STREAKS</div>
           </div>
           <div style={{ flex:1, textAlign:'center', padding:'10px 6px', background:'rgba(155,89,182,0.05)', borderRadius:6, border:'1px solid rgba(155,89,182,0.2)' }}>
-            <div className="cinzel" style={{ fontSize:16, color:'var(--violet)' }}>{(hunter.totalXP + hunter.level * hunter.xpToNextLevel).toLocaleString()}</div>
+            <div className="cinzel" style={{ fontSize:16, color:'var(--violet)' }}>{(()=>{ let t = hunter.totalXP; for(let i=1;i<hunter.level;i++) t+=Math.round(1000*Math.pow(i,1.5)); return t; })().toLocaleString()}</div>
             <div style={{ fontSize:9, color:'var(--text-dim)' }}>TOTAL XP</div>
           </div>
         </div>
@@ -2720,7 +2720,7 @@ function QuestCard({ quest, completed, onComplete, onDelete, onFail, onEdit, onS
               <span style={{ fontSize:10, color:'var(--gold)', fontFamily:'Cinzel,serif' }}>+{totalXP} XP total</span>
             </div>
             <div className="xp-bar-track" style={{ height:6 }}>
-              <div className="xp-bar-fill" style={{ width:`${subPct}%`, background:`linear-gradient(90deg, ${color}66, ${color})` }}/>
+              <div className="xp-bar-fill" style={{ width:`${subPct}%`, background:`linear-gradient(90deg, #b8860b, #F39C12, #FFD700)` }}/>
             </div>
           </div>
           {showSubs && (
@@ -2755,7 +2755,7 @@ function QuestCard({ quest, completed, onComplete, onDelete, onFail, onEdit, onS
             <span>Progress</span><span>{quest.progress||0}/{quest.target}</span>
           </div>
           <div className="xp-bar-track">
-            <div className="xp-bar-fill" style={{ width:`${Math.min(100,((quest.progress||0)/quest.target)*100)}%`, background:`linear-gradient(90deg, ${color}66, ${color})` }}/>
+            <div className="xp-bar-fill" style={{ width:`${Math.min(100,((quest.progress||0)/quest.target)*100)}%`, background:`linear-gradient(90deg, #b8860b, #F39C12, #FFD700)` }}/>
           </div>
         </div>
       )}
@@ -2923,12 +2923,94 @@ function getMuscleGlow(level) {
   return `0 0 20px #FFD700, 0 0 40px #FFD70080, 0 0 60px #FFD70040`;
 }
 
+const MUSCLE_RANKS = [
+  { min:0,  max:0,  rank:'—',  label:'Untrained',    color:'#3a3a5a' },
+  { min:1,  max:2,  rank:'E',  label:'Awakened',     color:'#6a7a9a' },
+  { min:3,  max:5,  rank:'D',  label:'Novice',       color:'#4CAF50' },
+  { min:6,  max:8,  rank:'C',  label:'Intermediate', color:'#4FC3F7' },
+  { min:9,  max:11, rank:'B',  label:'Advanced',     color:'#9B59B6' },
+  { min:12, max:14, rank:'A',  label:'Elite',        color:'#F39C12' },
+  { min:15, max:19, rank:'S',  label:'Legend',       color:'#E74C3C' },
+  { min:20, max:999,rank:'SS', label:'Monarch',      color:'#FFD700' },
+];
+function getMuscleRank(level) {
+  return MUSCLE_RANKS.find(r => level >= r.min && level <= r.max) || MUSCLE_RANKS[0];
+}
+
+const RECOVERY_QUESTIONS = [
+  { id:'soreness', q:'How sore is the trained muscle?', options:['No soreness','Mild (1-2/10)','Moderate (3-5/10)','Intense (6-8/10)','Extreme (9-10/10)'] },
+  { id:'hydration', q:'Did you hydrate well during training?', options:['Excellent (2L+)','Good (1.5L)','Average (1L)','Poor (less than 1L)'] },
+  { id:'sleep',     q:'How was your sleep last night?', options:['8+ hours (optimal)','6-7 hours (good)','4-5 hours (low)','Under 4 hours (critical)'] },
+  { id:'nutrition', q:'Did you eat enough protein today?', options:['Yes, well fueled','Adequate','Below target','Skipped meals'] },
+  { id:'effort',    q:'Rate your workout intensity', options:['Light warm-up','Moderate effort','Hard (near max)','Absolute maximum'] },
+];
+
+const RECOVERY_ADVICE = {
+  soreness: {
+    0:'Muscle wasn\'t challenged enough. Increase weight or volume next session.',
+    1:'Perfect range — aim to be back in 24-48h.',
+    2:'Optimal DOMS. Rest 48h before training this muscle again.',
+    3:'Heavy session. Take 48-72h rest. Use foam rolling and stretching.',
+    4:'Overreached. Rest 72-96h. Prioritize sleep and protein (1.6-2g/kg).',
+  },
+  sleep: {
+    0:'Muscle grows while you sleep. 8h = +25% faster recovery.',
+    1:'Good — aim for 8h tonight for maximum gains.',
+    2:'Recovery compromised. Prioritize sleep tonight.',
+    3:'Critical deficit. Training today may have caused more harm than good.',
+  },
+};
+
+const WORKOUT_PLANS = {
+  PPL: {
+    name:'Push Pull Legs (6-day)',
+    schedule:[
+      { day:'Monday',    focus:'PUSH', muscles:['chest','frontDelts','sideDelts','triceps'] },
+      { day:'Tuesday',   focus:'PULL', muscles:['lats','rhomboids','rearDelts','biceps','traps'] },
+      { day:'Wednesday', focus:'LEGS', muscles:['quads','hamstrings','glutes','calves','hipFlexors'] },
+      { day:'Thursday',  focus:'PUSH', muscles:['chest','frontDelts','sideDelts','triceps'] },
+      { day:'Friday',    focus:'PULL', muscles:['lats','rhomboids','rearDelts','biceps','forearms'] },
+      { day:'Saturday',  focus:'LEGS', muscles:['quads','hamstrings','glutes','calves','lowerBack'] },
+      { day:'Sunday',    focus:'REST', muscles:[] },
+    ]
+  },
+  UpperLower: {
+    name:'Upper/Lower Split (4-day)',
+    schedule:[
+      { day:'Monday',    focus:'UPPER', muscles:['chest','frontDelts','sideDelts','biceps','triceps','traps'] },
+      { day:'Tuesday',   focus:'LOWER', muscles:['quads','hamstrings','glutes','calves','lowerBack'] },
+      { day:'Wednesday', focus:'REST',  muscles:[] },
+      { day:'Thursday',  focus:'UPPER', muscles:['lats','rhomboids','rearDelts','biceps','triceps','forearms'] },
+      { day:'Friday',    focus:'LOWER', muscles:['quads','hamstrings','glutes','calves','hipFlexors'] },
+      { day:'Saturday',  focus:'REST',  muscles:[] },
+      { day:'Sunday',    focus:'REST',  muscles:[] },
+    ]
+  },
+  FullBody: {
+    name:'Full Body (3-day)',
+    schedule:[
+      { day:'Monday',    focus:'FULL A', muscles:['chest','quads','lats','frontDelts','biceps','calves'] },
+      { day:'Tuesday',   focus:'REST',   muscles:[] },
+      { day:'Wednesday', focus:'FULL B', muscles:['hamstrings','chest','rhomboids','sideDelts','triceps','abs'] },
+      { day:'Thursday',  focus:'REST',   muscles:[] },
+      { day:'Friday',    focus:'FULL C', muscles:['glutes','lats','chest','rearDelts','biceps','calves'] },
+      { day:'Saturday',  focus:'REST',   muscles:[] },
+      { day:'Sunday',    focus:'REST',   muscles:[] },
+    ]
+  },
+};
+
 function BodyScreen({ state, dispatch, addXP }) {
   const [view, setView] = useState('front');
+  const [bodyTab, setBodyTab] = useState('map'); // 'map' | 'ranks' | 'plan' | 'ai'
   const [tooltip, setTooltip] = useState(null);
   const [modalMuscle, setModalMuscle] = useState(null);
   const [showAssistant, setShowAssistant] = useState(false);
+  const [showRecoveryQuiz, setShowRecoveryQuiz] = useState(false);
+  const [recoveryAnswers, setRecoveryAnswers] = useState({});
+  const [recoveryMuscle, setRecoveryMuscle] = useState(null);
   const [workoutForm, setWorkoutForm] = useState({ exercise:'', sets:3, reps:10, weight:'' });
+  const [selectedPlan, setSelectedPlan] = useState('PPL');
 
   const handleMuscleTap = (muscleName) => { setModalMuscle(muscleName); };
 
@@ -2939,9 +3021,12 @@ function BodyScreen({ state, dispatch, addXP }) {
     dispatch({ type:'LOG_WORKOUT', payload:{ muscleName:modalMuscle, xpGain, entry:{ ...f } } });
     addXP(xpGain + 50, 'workout');
     dispatch({ type:'GAIN_STAT', payload:{ stat:'strength', amount:1 } });
+    setRecoveryMuscle(modalMuscle);
     setModalMuscle(null);
     setShowAssistant(false);
     setWorkoutForm({ exercise:'', sets:3, reps:10, weight:'' });
+    // Show recovery quiz after logging
+    setTimeout(() => setShowRecoveryQuiz(true), 400);
   };
 
   const muscle = modalMuscle ? state.muscles[modalMuscle] : null;
@@ -2952,7 +3037,6 @@ function BodyScreen({ state, dispatch, addXP }) {
     lowerBack:'Lower Back', glutes:'Glutes', hamstrings:'Hamstrings', hipFlexors:'Hip Flexors'
   };
 
-  // SVG body — stylized anatomical figure
   const frontMuscles = [
     { id:'chest', label:'Chest', d:'M 95,145 Q 110,135 125,138 L 125,162 Q 110,168 95,160 Z', cx:110,cy:152 },
     { id:'chest', label:'Chest', d:'M 175,145 Q 160,135 145,138 L 145,162 Q 160,168 175,160 Z', cx:160,cy:152 },
@@ -2995,79 +3079,272 @@ function BodyScreen({ state, dispatch, addXP }) {
 
   const muscles = view==='front' ? frontMuscles : backMuscles;
 
+  // Body tab content
+  const plan = WORKOUT_PLANS[selectedPlan];
+  const today = new Date().getDay(); // 0=Sun,1=Mon,...
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const todayName = dayNames[today];
+
   return (
     <div style={{ height:'100%', display:'flex', flexDirection:'column' }}>
-      <div style={{ padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-        <div className="cinzel" style={{ fontSize:18, color:'var(--mana)', letterSpacing:3 }}>BODY MAP</div>
-        <div style={{ display:'flex', gap:8 }}>
-          <button className={view==='front'?'btn-mana':'btn-danger'} style={{ padding:'5px 12px', opacity:view==='front'?1:0.5 }} onClick={()=>setView('front')}>FRONT</button>
-          <button className={view==='back'?'btn-mana':'btn-danger'} style={{ padding:'5px 12px', opacity:view==='back'?1:0.5 }} onClick={()=>setView('back')}>BACK</button>
-        </div>
+      {/* Tab bar */}
+      <div style={{ padding:'10px 14px 0', display:'flex', gap:6, flexShrink:0 }}>
+        {[{k:'map',l:'🗺 MAP'},{k:'ranks',l:'🏆 RANKS'},{k:'plan',l:'📋 PLAN'},{k:'ai',l:'🤖 AI COACH'}].map(t=>(
+          <button key={t.k} onClick={()=>setBodyTab(t.k)} style={{
+            flex:1, padding:'7px 4px', fontSize:10, borderRadius:6, cursor:'pointer',
+            border: bodyTab===t.k ? '1px solid var(--mana)' : '1px solid var(--border)',
+            background: bodyTab===t.k ? 'rgba(79,195,247,0.15)' : 'rgba(10,10,20,0.6)',
+            color: bodyTab===t.k ? 'var(--mana)' : 'var(--text-dim)', fontFamily:'Cinzel,serif'
+          }}>{t.l}</button>
+        ))}
       </div>
 
-      <div style={{ flex:1, display:'flex', overflow:'hidden' }}>
-        {/* SVG */}
-        <div style={{ flex:1, display:'flex', justifyContent:'center', alignItems:'flex-start', overflow:'auto', padding:'0 8px' }}>
-          <svg viewBox="55 105 160 285" width="200" height="380" style={{ filter:'drop-shadow(0 0 10px rgba(79,195,247,0.1))' }}>
-            {/* Body silhouette */}
-            <ellipse cx="135" cy="120" rx="20" ry="22" fill="#0f0f1a" stroke="#1a1a2e" strokeWidth="1.5"/>
-            {/* Neck */}
-            <rect x="128" y="138" width="14" height="12" fill="#0f0f1a" stroke="#1a1a2e" strokeWidth="1"/>
-            {/* Torso */}
-            <path d="M 90,148 Q 82,152 80,200 Q 80,245 90,258 L 180,258 Q 190,245 190,200 Q 188,152 180,148 Z" fill="#0a0a15" stroke="#1a1a2e" strokeWidth="1.5"/>
-            {/* Arms */}
-            <path d="M 82,150 Q 70,165 68,210 L 80,210 Q 82,168 92,152 Z" fill="#0a0a15" stroke="#1a1a2e" strokeWidth="1"/>
-            <path d="M 188,150 Q 200,165 202,210 L 190,210 Q 188,168 178,152 Z" fill="#0a0a15" stroke="#1a1a2e" strokeWidth="1"/>
-            {/* Legs */}
-            <path d="M 90,258 Q 85,290 87,330 Q 88,360 90,380 L 130,380 L 130,258 Z" fill="#0a0a15" stroke="#1a1a2e" strokeWidth="1"/>
-            <path d="M 180,258 Q 185,290 183,330 Q 182,360 180,380 L 140,380 L 140,258 Z" fill="#0a0a15" stroke="#1a1a2e" strokeWidth="1"/>
-            {/* Muscle overlays */}
-            {muscles.map((m,i) => {
-              const ms = state.muscles[m.id];
-              const color = getMuscleColor(ms?.level||0);
-              const glow = getMuscleGlow(ms?.level||0);
-              return (
-                <path key={i} d={m.d}
-                  fill={color} opacity={0.85}
-                  style={{ cursor:'pointer', filter: ms?.level>0 ? `drop-shadow(${glow})` : 'none', transition:'all 0.3s' }}
-                  onClick={()=>handleMuscleTap(m.id)}
-                  onMouseEnter={e=>{
-                    const r = e.currentTarget.getBoundingClientRect();
-                    setTooltip({ name:m.label, muscle:ms, x:r.left, y:r.top });
-                  }}
-                  onMouseLeave={()=>setTooltip(null)}
-                />
-              );
-            })}
-          </svg>
+      {/* BODY MAP TAB */}
+      {bodyTab==='map' && (
+        <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+          <div style={{ padding:'8px 14px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div className="cinzel" style={{ fontSize:15, color:'var(--mana)', letterSpacing:3 }}>BODY MAP</div>
+            <div style={{ display:'flex', gap:6 }}>
+              <button className={view==='front'?'btn-mana':'btn-danger'} style={{ padding:'5px 12px', opacity:view==='front'?1:0.5, fontSize:10 }} onClick={()=>setView('front')}>FRONT</button>
+              <button className={view==='back'?'btn-mana':'btn-danger'} style={{ padding:'5px 12px', opacity:view==='back'?1:0.5, fontSize:10 }} onClick={()=>setView('back')}>BACK</button>
+            </div>
+          </div>
+          <div style={{ flex:1, display:'flex', overflow:'hidden' }}>
+            {/* SVG */}
+            <div style={{ flex:1, display:'flex', justifyContent:'center', alignItems:'flex-start', overflow:'auto', padding:'0 8px' }}>
+              <svg viewBox="55 105 160 285" width="200" height="380" style={{ filter:'drop-shadow(0 0 10px rgba(79,195,247,0.1))' }}>
+                <ellipse cx="135" cy="120" rx="20" ry="22" fill="#0f0f1a" stroke="#1a1a2e" strokeWidth="1.5"/>
+                <rect x="128" y="138" width="14" height="12" fill="#0f0f1a" stroke="#1a1a2e" strokeWidth="1"/>
+                <path d="M 90,148 Q 82,152 80,200 Q 80,245 90,258 L 180,258 Q 190,245 190,200 Q 188,152 180,148 Z" fill="#0a0a15" stroke="#1a1a2e" strokeWidth="1.5"/>
+                <path d="M 82,150 Q 70,165 68,210 L 80,210 Q 82,168 92,152 Z" fill="#0a0a15" stroke="#1a1a2e" strokeWidth="1"/>
+                <path d="M 188,150 Q 200,165 202,210 L 190,210 Q 188,168 178,152 Z" fill="#0a0a15" stroke="#1a1a2e" strokeWidth="1"/>
+                <path d="M 90,258 Q 85,290 87,330 Q 88,360 90,380 L 130,380 L 130,258 Z" fill="#0a0a15" stroke="#1a1a2e" strokeWidth="1"/>
+                <path d="M 180,258 Q 185,290 183,330 Q 182,360 180,380 L 140,380 L 140,258 Z" fill="#0a0a15" stroke="#1a1a2e" strokeWidth="1"/>
+                {muscles.map((m,i) => {
+                  const ms = state.muscles[m.id];
+                  const color = getMuscleColor(ms?.level||0);
+                  const glow = getMuscleGlow(ms?.level||0);
+                  return (
+                    <path key={i} d={m.d}
+                      fill={color} opacity={0.85}
+                      style={{ cursor:'pointer', filter: ms?.level>0 ? `drop-shadow(${glow})` : 'none', transition:'all 0.3s' }}
+                      onClick={()=>handleMuscleTap(m.id)}
+                      onMouseEnter={e=>{
+                        const r = e.currentTarget.getBoundingClientRect();
+                        setTooltip({ name:m.label, muscle:ms, x:r.left, y:r.top });
+                      }}
+                      onMouseLeave={()=>setTooltip(null)}
+                    />
+                  );
+                })}
+              </svg>
+            </div>
+            {/* Enhanced Muscle List */}
+            <div className="scrollable" style={{ width:150, padding:'0 8px 16px', borderLeft:'1px solid var(--border)' }}>
+              <div style={{ fontSize:9, color:'var(--text-dim)', letterSpacing:2, padding:'8px 0 8px', textAlign:'center' }}>MUSCLE LOG</div>
+              {Object.entries(state.muscles).map(([k,m])=>{
+                const mr = getMuscleRank(m.level);
+                const xpNeeded = MUSCLE_XP_PER_LEVEL(m.level);
+                const xpPct = xpNeeded > 0 ? Math.min(100, (m.xp/xpNeeded)*100) : 0;
+                return (
+                  <div key={k} onClick={()=>setModalMuscle(k)} style={{
+                    padding:'8px', marginBottom:6, borderRadius:6, cursor:'pointer',
+                    border:`1px solid ${mr.color}33`,
+                    background:`${mr.color}0a`,
+                    transition:'all 0.2s'
+                  }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+                      <div style={{ fontSize:10, color:'var(--text)', fontWeight:600 }}>{MUSCLE_NAMES[k]||k}</div>
+                      <span style={{ fontSize:8, color:mr.color, border:`1px solid ${mr.color}55`, padding:'1px 4px', borderRadius:3, fontFamily:'Cinzel,serif' }}>{mr.rank}</span>
+                    </div>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text-dim)', marginBottom:4 }}>
+                      <span style={{ color:mr.color }}>Lv.{m.level}</span>
+                      <span>{m.trained}× trained</span>
+                    </div>
+                    <div style={{ height:3, background:'rgba(255,255,255,0.06)', borderRadius:2, overflow:'hidden' }}>
+                      <div style={{ height:'100%', width:`${xpPct}%`, background:`linear-gradient(90deg,#b8860b,#F39C12,#FFD700)`, borderRadius:2, transition:'width 0.5s' }}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
+      )}
 
-        {/* Muscle List */}
-        <div className="scrollable" style={{ width:140, padding:'0 8px 16px', borderLeft:'1px solid var(--border)' }}>
-          <div style={{ fontSize:10, color:'var(--text-dim)', letterSpacing:2, padding:'8px 0 10px', textAlign:'center' }}>MUSCLE LOG</div>
-          {Object.entries(state.muscles).map(([k,m])=>(
-            <div key={k} onClick={()=>setModalMuscle(k)} style={{
-              padding:'7px 8px', marginBottom:4, borderRadius:6, cursor:'pointer',
-              border:`1px solid ${getMuscleColor(m.level)}44`,
-              background:`${getMuscleColor(m.level)}11`,
-              transition:'all 0.2s'
-            }}>
-              <div style={{ fontSize:10, color:'var(--text)', marginBottom:2 }}>{MUSCLE_NAMES[k]||k}</div>
-              <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text-dim)' }}>
-                <span style={{ color:getMuscleColor(m.level) }}>Lv.{m.level}</span>
-                <span>{m.trained}x</span>
+      {/* MUSCLE RANKS TAB */}
+      {bodyTab==='ranks' && (
+        <div className="scrollable" style={{ flex:1, padding:'12px 14px' }}>
+          <div className="cinzel" style={{ fontSize:15, color:'var(--mana)', letterSpacing:3, marginBottom:4 }}>MUSCLE RANKS</div>
+          <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:14 }}>Tap any muscle to log a workout and gain XP</div>
+
+          {/* Rank Legend */}
+          <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:16 }}>
+            {MUSCLE_RANKS.filter(r=>r.rank!=='—').map(r=>(
+              <div key={r.rank} style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 8px', borderRadius:6, border:`1px solid ${r.color}44`, background:`${r.color}0a` }}>
+                <span style={{ fontSize:10, color:r.color, fontFamily:'Cinzel,serif', fontWeight:700 }}>{r.rank}</span>
+                <span style={{ fontSize:9, color:'var(--text-dim)' }}>{r.label}</span>
               </div>
+            ))}
+          </div>
+
+          {/* Muscle Groups */}
+          {[
+            { group:'PUSH', muscles:['chest','frontDelts','sideDelts','triceps'], emoji:'💪' },
+            { group:'PULL', muscles:['lats','rhomboids','rearDelts','biceps','traps','forearms'], emoji:'🏋' },
+            { group:'LEGS', muscles:['quads','hamstrings','glutes','calves','hipFlexors','lowerBack'], emoji:'🦵' },
+            { group:'CORE', muscles:['abs','obliques'], emoji:'⚡' },
+          ].map(({ group, muscles:ms, emoji })=>(
+            <div key={group} style={{ marginBottom:16 }}>
+              <div style={{ fontSize:11, color:'var(--text-dim)', letterSpacing:2, marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+                <span>{emoji}</span><span>{group} MUSCLES</span>
+              </div>
+              {ms.map(k=>{
+                const m = state.muscles[k];
+                if (!m) return null;
+                const mr = getMuscleRank(m.level);
+                const xpNeeded = MUSCLE_XP_PER_LEVEL(m.level);
+                const xpPct = xpNeeded > 0 ? Math.min(100, (m.xp/xpNeeded)*100) : 0;
+                const nextRank = MUSCLE_RANKS.find(r => r.min > m.level);
+                const levelsToNext = nextRank ? (nextRank.min - m.level) : 0;
+                return (
+                  <div key={k} onClick={()=>setModalMuscle(k)} className="panel" style={{
+                    padding:'12px', marginBottom:8, cursor:'pointer',
+                    borderColor:`${mr.color}44`,
+                    transition:'all 0.2s'
+                  }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+                      <div style={{
+                        width:38, height:38, borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center',
+                        background:`${mr.color}18`, border:`1px solid ${mr.color}66`,
+                        flexShrink:0
+                      }}>
+                        <span className="cinzel" style={{ fontSize:14, color:mr.color, fontWeight:900 }}>{mr.rank}</span>
+                      </div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
+                          <span className="cinzel" style={{ fontSize:13, color:'var(--text)' }}>{MUSCLE_NAMES[k]||k}</span>
+                          <span style={{ fontSize:11, color:mr.color }}>Lv.{m.level}</span>
+                        </div>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text-dim)', marginTop:2 }}>
+                          <span style={{ color:mr.color }}>{mr.label}</span>
+                          <span>{m.trained} sessions</span>
+                        </div>
+                      </div>
+                    </div>
+                    {/* XP progress bar */}
+                    <div>
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text-dim)', marginBottom:4 }}>
+                        <span>{m.xp} / {xpNeeded} XP</span>
+                        {nextRank && <span style={{ color:nextRank.color }}>{levelsToNext} lvl to {nextRank.rank}-rank</span>}
+                      </div>
+                      <div style={{ height:6, background:'rgba(255,255,255,0.05)', borderRadius:3, overflow:'hidden' }}>
+                        <div style={{ height:'100%', width:`${xpPct}%`, background:`linear-gradient(90deg,#b8860b,#F39C12,#FFD700)`, borderRadius:3, boxShadow:`0 0 6px rgba(243,156,18,0.6)`, transition:'width 0.5s' }}/>
+                      </div>
+                    </div>
+                    {/* Suggestions row */}
+                    <div style={{ marginTop:8, fontSize:9, color:'var(--text-dim)', display:'flex', gap:6, flexWrap:'wrap' }}>
+                      {(WORKOUT_LIBRARY[k]||[]).slice(0,3).map(ex=>(
+                        <span key={ex} style={{ padding:'2px 6px', borderRadius:4, background:`${mr.color}12`, border:`1px solid ${mr.color}22`, color:mr.color }}>{ex}</span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
-      </div>
+      )}
+
+      {/* WORKOUT PLAN TAB */}
+      {bodyTab==='plan' && (
+        <div className="scrollable" style={{ flex:1, padding:'12px 14px' }}>
+          <div className="cinzel" style={{ fontSize:15, color:'var(--mana)', letterSpacing:3, marginBottom:4 }}>WORKOUT PLAN</div>
+          <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:14 }}>Choose a training split and follow your weekly plan</div>
+
+          {/* Plan selector */}
+          <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap' }}>
+            {Object.entries(WORKOUT_PLANS).map(([k,p])=>(
+              <button key={k} onClick={()=>setSelectedPlan(k)} style={{
+                flex:1, padding:'8px', fontSize:10, borderRadius:6, cursor:'pointer', minWidth:80,
+                border: selectedPlan===k ? '1px solid var(--mana)' : '1px solid var(--border)',
+                background: selectedPlan===k ? 'rgba(79,195,247,0.15)' : 'rgba(10,10,20,0.6)',
+                color: selectedPlan===k ? 'var(--mana)' : 'var(--text-dim)', fontFamily:'Cinzel,serif'
+              }}>{p.name.split('(')[0].trim()}</button>
+            ))}
+          </div>
+
+          <div className="panel" style={{ padding:14, marginBottom:16, borderColor:'rgba(79,195,247,0.3)' }}>
+            <div className="cinzel" style={{ fontSize:12, color:'var(--mana)', letterSpacing:2, marginBottom:4 }}>{plan.name}</div>
+            <div style={{ fontSize:11, color:'var(--text-dim)' }}>
+              {selectedPlan==='PPL' && '6 days/week — Maximum volume. Best for intermediate+'}
+              {selectedPlan==='UpperLower' && '4 days/week — Balanced frequency and recovery'}
+              {selectedPlan==='FullBody' && '3 days/week — Perfect for beginners or cutting phases'}
+            </div>
+          </div>
+
+          {plan.schedule.map((day, idx)=>{
+            const isToday = day.day === todayName;
+            const isRest = day.focus === 'REST';
+            const muscleLevels = day.muscles.map(m => state.muscles[m]?.level||0);
+            const avgLevel = muscleLevels.length > 0 ? Math.round(muscleLevels.reduce((a,b)=>a+b,0)/muscleLevels.length) : 0;
+            const dayRank = getMuscleRank(avgLevel);
+            return (
+              <div key={idx} className="panel" style={{
+                padding:14, marginBottom:8,
+                borderColor: isToday ? 'rgba(79,195,247,0.5)' : isRest ? 'rgba(255,255,255,0.05)' : `${dayRank.color}33`,
+                background: isToday ? 'rgba(79,195,247,0.07)' : 'var(--card)',
+                boxShadow: isToday ? '0 0 20px rgba(79,195,247,0.15)' : 'none'
+              }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:isRest?0:10 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    {isToday && <span style={{ fontSize:10, color:'var(--mana)', border:'1px solid var(--mana)', padding:'1px 6px', borderRadius:4, fontFamily:'Cinzel,serif' }}>TODAY</span>}
+                    <span className="cinzel" style={{ fontSize:13, color: isToday ? 'var(--mana)' : isRest ? 'var(--text-dim)' : 'var(--text)' }}>{day.day}</span>
+                  </div>
+                  <span className="cinzel" style={{ fontSize:12, color: isRest ? 'var(--text-dim)' : dayRank.color }}>
+                    {isRest ? '🛌 REST' : day.focus}
+                  </span>
+                </div>
+                {!isRest && (
+                  <>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:10 }}>
+                      {day.muscles.map(mk=>{
+                        const mm = state.muscles[mk];
+                        const mr = getMuscleRank(mm?.level||0);
+                        return (
+                          <span key={mk} onClick={()=>setModalMuscle(mk)} style={{
+                            padding:'3px 8px', borderRadius:5, fontSize:10, cursor:'pointer',
+                            background:`${mr.color}15`, border:`1px solid ${mr.color}44`, color:mr.color
+                          }}>{MUSCLE_NAMES[mk]||mk} {mm?.level>0?`Lv${mm.level}`:''}</span>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display:'flex', gap:6 }}>
+                      {(WORKOUT_LIBRARY[day.muscles[0]]||[]).slice(0,2).map(ex=>(
+                        <span key={ex} style={{ fontSize:9, color:'var(--text-dim)', padding:'2px 6px', background:'rgba(255,255,255,0.04)', borderRadius:4, border:'1px solid rgba(255,255,255,0.08)' }}>{ex}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* AI COACH TAB */}
+      {bodyTab==='ai' && (
+        <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
+          <BodyAICoach state={state} />
+        </div>
+      )}
 
       {/* Tooltip */}
       {tooltip && (
         <div className="muscle-tooltip" style={{ left:tooltip.x-60, top:tooltip.y-70 }}>
           <div style={{ color:'var(--mana)', fontWeight:700, marginBottom:4 }}>{tooltip.name}</div>
-          <div style={{ fontSize:11 }}>Level: {tooltip.muscle?.level||0}</div>
-          <div style={{ fontSize:11 }}>Trained: {tooltip.muscle?.trained||0}x</div>
+          <div style={{ fontSize:11 }}>Level: {tooltip.muscle?.level||0} · {getMuscleRank(tooltip.muscle?.level||0).label}</div>
+          <div style={{ fontSize:11 }}>Trained: {tooltip.muscle?.trained||0}×</div>
         </div>
       )}
 
@@ -3076,10 +3353,26 @@ function BodyScreen({ state, dispatch, addXP }) {
         <div className="modal-overlay" onClick={()=>setModalMuscle(null)}>
           <div className="modal-box" onClick={e=>e.stopPropagation()}>
             <div className="cinzel" style={{ color:'var(--mana)', fontSize:16, marginBottom:4 }}>LOG WORKOUT</div>
-            <div style={{ fontSize:12, color:'var(--text-dim)', marginBottom:12 }}>
-              {MUSCLE_NAMES[modalMuscle]||modalMuscle} — Lv.{muscle?.level||0} | {muscle?.trained||0} sessions
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
+              {(()=>{
+                const lm = state.muscles[modalMuscle];
+                const mr = getMuscleRank(lm?.level||0);
+                const xpN = MUSCLE_XP_PER_LEVEL(lm?.level||0);
+                const pct = xpN > 0 ? Math.min(100,(lm?.xp||0)/xpN*100) : 0;
+                return (
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                      <span style={{ fontSize:12, color:'var(--text-dim)' }}>{MUSCLE_NAMES[modalMuscle]||modalMuscle}</span>
+                      <span style={{ fontSize:11, color:mr.color, fontFamily:'Cinzel,serif' }}>{mr.rank} · Lv.{lm?.level||0}</span>
+                    </div>
+                    <div style={{ height:5, background:'rgba(255,255,255,0.06)', borderRadius:3, overflow:'hidden' }}>
+                      <div style={{ height:'100%', width:`${pct}%`, background:`linear-gradient(90deg,#b8860b,#F39C12,#FFD700)`, borderRadius:3 }}/>
+                    </div>
+                    <div style={{ fontSize:9, color:'var(--text-dim)', marginTop:3 }}>{lm?.trained||0} sessions logged</div>
+                  </div>
+                );
+              })()}
             </div>
-            {/* Workout Assistant CTA */}
             <button onClick={()=>setShowAssistant(true)} style={{
               width:'100%', padding:'10px', marginBottom:16, borderRadius:8, cursor:'pointer',
               background:'rgba(155,89,182,0.12)', border:'1px solid rgba(155,89,182,0.4)',
@@ -3116,6 +3409,288 @@ function BodyScreen({ state, dispatch, addXP }) {
           onLogWorkout={(form)=>logWorkout(form)}
         />
       )}
+
+      {/* Recovery Quiz */}
+      {showRecoveryQuiz && recoveryMuscle && (
+        <div className="modal-overlay" onClick={()=>{ setShowRecoveryQuiz(false); setRecoveryAnswers({}); }}>
+          <div className="modal-box" onClick={e=>e.stopPropagation()} style={{ maxWidth:460 }}>
+            <div className="cinzel" style={{ color:'var(--mana)', fontSize:15, marginBottom:4 }}>🔄 RECOVERY CHECK</div>
+            <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:16 }}>
+              {MUSCLE_NAMES[recoveryMuscle]||recoveryMuscle} — assess your recovery needs
+            </div>
+
+            {RECOVERY_QUESTIONS.map(q=>(
+              <div key={q.id} style={{ marginBottom:14 }}>
+                <div style={{ fontSize:12, color:'var(--text)', marginBottom:8, fontWeight:600 }}>{q.q}</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                  {q.options.map((opt,oi)=>(
+                    <button key={oi} onClick={()=>setRecoveryAnswers(p=>({...p,[q.id]:oi}))} style={{
+                      padding:'8px 12px', borderRadius:6, cursor:'pointer', textAlign:'left',
+                      border: recoveryAnswers[q.id]===oi ? '1px solid var(--mana)' : '1px solid var(--border)',
+                      background: recoveryAnswers[q.id]===oi ? 'rgba(79,195,247,0.12)' : 'rgba(10,10,20,0.4)',
+                      color: recoveryAnswers[q.id]===oi ? 'var(--mana)' : 'var(--text-dim)', fontSize:12, transition:'all 0.15s'
+                    }}>{opt}</button>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {/* Show advice if soreness answered */}
+            {recoveryAnswers.soreness !== undefined && (
+              <div style={{ padding:'12px 14px', borderRadius:8, background:'rgba(79,195,247,0.05)', border:'1px solid rgba(79,195,247,0.2)', marginBottom:14 }}>
+                <div style={{ fontSize:10, color:'var(--mana)', letterSpacing:2, marginBottom:6 }}>💡 RECOVERY ADVICE</div>
+                <div style={{ fontSize:12, color:'var(--text)', lineHeight:1.6 }}>
+                  {RECOVERY_ADVICE.soreness[recoveryAnswers.soreness]}
+                </div>
+                {recoveryAnswers.sleep !== undefined && (
+                  <div style={{ fontSize:12, color:'var(--text)', lineHeight:1.6, marginTop:8, borderTop:'1px solid rgba(79,195,247,0.1)', paddingTop:8 }}>
+                    {RECOVERY_ADVICE.sleep[recoveryAnswers.sleep]}
+                  </div>
+                )}
+                <div style={{ marginTop:10, fontSize:11 }}>
+                  <span style={{ color:'var(--gold)' }}>Recommended rest: </span>
+                  <span style={{ color:'var(--text)' }}>
+                    {recoveryAnswers.soreness <= 1 ? '24h' : recoveryAnswers.soreness === 2 ? '48h' : recoveryAnswers.soreness === 3 ? '48-72h' : '72-96h'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <button className="btn-mana" style={{ width:'100%' }} onClick={()=>{ setShowRecoveryQuiz(false); setRecoveryAnswers({}); }}>
+              ✓ COMPLETE CHECK-IN
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BODY AI COACH  — Powered by Claude API
+// ─────────────────────────────────────────────────────────────────────────────
+const AI_QUICK_ACTIONS = [
+  { id:'recovery',  icon:'🔄', label:'Recovery Status',   prompt:'Analyze my current muscle recovery status based on my workout data. Tell me which muscles are ready to train, which need more rest, and give specific recovery tips.' },
+  { id:'plan',      icon:'📋', label:'Custom Workout Plan', prompt:'Create a personalized weekly workout plan for me based on my muscle levels, training history, and goals. Include sets, reps, and exercise selection for each day.' },
+  { id:'diet',      icon:'🥗', label:'Diet & Nutrition',   prompt:'Based on my training level and muscle data, give me a detailed nutrition plan. Include macros (protein/carbs/fats), meal timing, and specific food recommendations for muscle growth and recovery.' },
+  { id:'weakness',  icon:'⚠️', label:'Weak Points',        prompt:'Look at my muscle levels and identify my biggest weaknesses and imbalances. Which muscles are lagging behind? Give me a priority training plan to fix these.' },
+  { id:'physique',  icon:'💪', label:'Physique Analysis',  prompt:'Give me a comprehensive physique analysis based on all my data. Assess my overall development, muscle balance, and what my physique profile looks like. What\'s my strongest body part?' },
+  { id:'progress',  icon:'📈', label:'Progress Report',    prompt:'Generate a detailed progress report for me. How am I progressing overall? What improvements have I made? What should I focus on in the next month to maximize gains?' },
+];
+
+function buildHunterContext(state) {
+  const { hunter, stats, muscles, workouts, habits } = state;
+  const muscleSummary = Object.entries(muscles)
+    .map(([k,m]) => `${k}: Lv${m.level} (${m.trained} sessions, ${getMuscleRank(m.level).label})`)
+    .join(', ');
+  const recentWorkouts = (workouts||[]).slice(0,10)
+    .map(w => `${w.muscleName} - ${w.exercise||'workout'} (${new Date(w.date).toLocaleDateString()})`)
+    .join('; ');
+  const statSummary = Object.entries(stats).map(([k,v])=>`${k}:${v}`).join(', ');
+  const goal = state.assessmentAnswers?.goal || 'Not set';
+  const physique = state.assessmentAnswers?.dreamPhysique || 'Not set';
+  return `HUNTER PROFILE:
+Name: ${hunter.name} | Level: ${hunter.level} | Rank: ${hunter.rank} | Class: ${hunter.class||'warrior'}
+Total XP: ${hunter.totalXP} | HP: ${Math.round(hunter.hp||100)}/${hunter.maxHp||100}
+Goal: "${goal}" | Dream Physique: "${physique}"
+
+STATS: ${statSummary}
+
+MUSCLE LEVELS (name: level | sessions | rank):
+${muscleSummary}
+
+RECENT WORKOUTS (last 10): ${recentWorkouts || 'None logged yet'}
+
+ACTIVE HABITS: ${(habits||[]).filter(h=>h.streak>0).map(h=>`${h.name}(streak:${h.streak})`).join(', ')||'None'}`;
+}
+
+function BodyAICoach({ state }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [activeQuick, setActiveQuick] = useState(null);
+  const chatEndRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior:'smooth' });
+  }, [messages, loading]);
+
+  // Welcome message on mount
+  useEffect(() => {
+    setMessages([{
+      role:'assistant',
+      content:`⚔️ **Shadow System AI Coach Online**\n\nI have full access to your hunter profile — muscle levels, workout history, stats, and goals. Ask me anything or pick a quick action below.\n\n**I can help with:**\n• Custom workout plans & programming\n• Recovery analysis & rest recommendations\n• Diet & nutrition protocols\n• Weak point identification & fixing\n• Physique assessment & improvement roadmap\n• Progress tracking & periodization\n\nWhat would you like to work on, ${state.hunter.name}?`
+    }]);
+  }, []);
+
+  const sendMessage = async (text) => {
+    const userText = text || input.trim();
+    if (!userText || loading) return;
+    setInput('');
+    setActiveQuick(null);
+
+    const hunterCtx = buildHunterContext(state);
+    const newMessages = [...messages, { role:'user', content: userText }];
+    setMessages(newMessages);
+    setLoading(true);
+
+    try {
+      const apiMessages = newMessages.map(m => ({ role: m.role, content: m.content }));
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          system: `You are a world-class AI fitness coach, sports nutritionist, and physique analyst embedded inside a gamified self-improvement app called "New You — Shadow System". You have complete access to the user's hunter profile data below.
+
+${hunterCtx}
+
+COACHING STYLE:
+- Be direct, knowledgeable, and motivating. Use the hunter/RPG theme naturally but don't overdo it.
+- Give SPECIFIC, ACTIONABLE advice (exact exercises, sets, reps, weights, macros).
+- Reference their actual muscle data when relevant (e.g. "Your chest is Lv.3 but your triceps are Lv.0 — you NEED to fix this imbalance").
+- Use markdown formatting (bold headers, bullet lists) for structured responses.
+- Be honest about weaknesses — this user wants real feedback, not empty praise.
+- Keep responses focused and practical. No padding or filler.`,
+          messages: apiMessages,
+        })
+      });
+
+      const data = await response.json();
+      const reply = data.content?.map(c => c.text||'').join('') || 'No response received.';
+      setMessages(prev => [...prev, { role:'assistant', content: reply }]);
+    } catch(err) {
+      setMessages(prev => [...prev, { role:'assistant', content:`⚠️ Connection error. Please try again.\n\n${err.message}` }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleQuick = (action) => {
+    setActiveQuick(action.id);
+    sendMessage(action.prompt);
+  };
+
+  // Simple markdown renderer
+  const renderMD = (text) => {
+    return text
+      .split('\n')
+      .map((line, i) => {
+        if (line.startsWith('**') && line.endsWith('**') && line.length > 4) {
+          return <div key={i} style={{ color:'var(--gold)', fontWeight:700, marginTop:8, marginBottom:2, fontSize:12 }}>{line.slice(2,-2)}</div>;
+        }
+        if (line.startsWith('• ') || line.startsWith('- ')) {
+          const content = line.slice(2).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          return <div key={i} style={{ display:'flex', gap:6, marginBottom:3 }}>
+            <span style={{ color:'var(--gold)', flexShrink:0 }}>▸</span>
+            <span style={{ fontSize:12, color:'var(--text)', lineHeight:1.5 }} dangerouslySetInnerHTML={{__html: content}}/>
+          </div>;
+        }
+        // inline bold
+        const parts = line.split(/\*\*(.*?)\*\*/g);
+        return <div key={i} style={{ fontSize:12, color: line.startsWith('#') ? 'var(--mana)' : 'var(--text)', lineHeight:1.6, marginBottom:2 }}>
+          {parts.map((p,j) => j%2===1 ? <strong key={j} style={{ color:'var(--gold)' }}>{p}</strong> : p)}
+        </div>;
+      });
+  };
+
+  return (
+    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
+      {/* Header */}
+      <div style={{ padding:'10px 14px 8px', borderBottom:'1px solid rgba(155,89,182,0.2)', flexShrink:0, background:'rgba(155,89,182,0.04)' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <div style={{ width:8, height:8, borderRadius:'50%', background:'#2ECC71', boxShadow:'0 0 6px #2ECC71', animation:'breathe 2s ease-in-out infinite' }}/>
+          <span className="cinzel" style={{ fontSize:13, color:'var(--violet)', letterSpacing:2 }}>AI COACH — ONLINE</span>
+          <span style={{ fontSize:10, color:'var(--text-dim)', marginLeft:'auto' }}>Shadow System v2.0</span>
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+        <div style={{ display:'flex', gap:5, overflowX:'auto', paddingBottom:2 }}>
+          {AI_QUICK_ACTIONS.map(a=>(
+            <button key={a.id} onClick={()=>handleQuick(a)} disabled={loading} style={{
+              flexShrink:0, padding:'5px 10px', borderRadius:20, fontSize:10, cursor:loading?'not-allowed':'pointer',
+              border: activeQuick===a.id ? '1px solid var(--violet)' : '1px solid rgba(155,89,182,0.3)',
+              background: activeQuick===a.id ? 'rgba(155,89,182,0.2)' : 'rgba(155,89,182,0.06)',
+              color: activeQuick===a.id ? 'var(--violet)' : 'var(--text-dim)',
+              transition:'all 0.2s', display:'flex', alignItems:'center', gap:4,
+              opacity: loading ? 0.5 : 1
+            }}>
+              <span>{a.icon}</span><span style={{ fontFamily:'Cinzel,serif', letterSpacing:0.5 }}>{a.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Chat messages */}
+      <div className="scrollable" style={{ flex:1, padding:'12px 14px', display:'flex', flexDirection:'column', gap:12 }}>
+        {messages.map((msg, i) => (
+          <div key={i} style={{
+            display:'flex', flexDirection: msg.role==='user' ? 'row-reverse' : 'row', gap:8, alignItems:'flex-start'
+          }}>
+            {/* Avatar */}
+            <div style={{
+              width:30, height:30, borderRadius:'50%', flexShrink:0,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              background: msg.role==='user' ? 'rgba(243,156,18,0.15)' : 'rgba(155,89,182,0.15)',
+              border: `1px solid ${msg.role==='user' ? 'rgba(243,156,18,0.4)' : 'rgba(155,89,182,0.4)'}`,
+              fontSize:13
+            }}>
+              {msg.role==='user' ? '⚔️' : '🤖'}
+            </div>
+            {/* Bubble */}
+            <div style={{
+              maxWidth:'82%', padding:'10px 14px', borderRadius: msg.role==='user' ? '12px 4px 12px 12px' : '4px 12px 12px 12px',
+              background: msg.role==='user' ? 'rgba(243,156,18,0.08)' : 'rgba(10,10,20,0.8)',
+              border: `1px solid ${msg.role==='user' ? 'rgba(243,156,18,0.25)' : 'rgba(155,89,182,0.2)'}`,
+              boxShadow: msg.role==='assistant' ? '0 2px 12px rgba(0,0,0,0.3)' : 'none'
+            }}>
+              {msg.role==='user'
+                ? <div style={{ fontSize:12, color:'var(--gold)', lineHeight:1.5 }}>{msg.content}</div>
+                : <div>{renderMD(msg.content)}</div>
+              }
+            </div>
+          </div>
+        ))}
+
+        {/* Typing indicator */}
+        {loading && (
+          <div style={{ display:'flex', gap:8, alignItems:'flex-start' }}>
+            <div style={{ width:30, height:30, borderRadius:'50%', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(155,89,182,0.15)', border:'1px solid rgba(155,89,182,0.4)', fontSize:13 }}>🤖</div>
+            <div style={{ padding:'12px 16px', borderRadius:'4px 12px 12px 12px', background:'rgba(10,10,20,0.8)', border:'1px solid rgba(155,89,182,0.2)', display:'flex', gap:5, alignItems:'center' }}>
+              {[0,1,2].map(j=>(
+                <div key={j} style={{ width:6, height:6, borderRadius:'50%', background:'var(--violet)', animation:'typingDot 1.2s ease-in-out infinite', animationDelay:`${j*0.2}s` }}/>
+              ))}
+            </div>
+          </div>
+        )}
+        <div ref={chatEndRef}/>
+      </div>
+
+      {/* Input bar */}
+      <div style={{ padding:'10px 12px', borderTop:'1px solid var(--border)', flexShrink:0, background:'rgba(5,5,12,0.95)', display:'flex', gap:8 }}>
+        <input
+          ref={inputRef}
+          className="input-dark"
+          value={input}
+          onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); } }}
+          placeholder="Ask your AI coach anything... (diet, recovery, exercises)"
+          disabled={loading}
+          style={{ flex:1, padding:'10px 14px', fontSize:12, background:'rgba(10,10,20,0.8)', borderColor: input ? 'rgba(155,89,182,0.5)' : 'var(--border)' }}
+        />
+        <button onClick={()=>sendMessage()} disabled={loading || !input.trim()} style={{
+          padding:'10px 16px', borderRadius:8, cursor: loading||!input.trim() ? 'not-allowed' : 'pointer',
+          background: input.trim() ? 'rgba(155,89,182,0.2)' : 'rgba(10,10,20,0.4)',
+          border: `1px solid ${input.trim() ? 'var(--violet)' : 'var(--border)'}`,
+          color: input.trim() ? 'var(--violet)' : 'var(--text-dim)',
+          fontSize:16, transition:'all 0.2s', flexShrink:0,
+          opacity: loading ? 0.5 : 1
+        }}>➤</button>
+      </div>
     </div>
   );
 }
@@ -4552,6 +5127,15 @@ function RankCardModal({ state, onClose }) {
 
   }, []);
 
+  const download = () => {
+    const canvas = canvasRef.current;
+    const url = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url; a.download = `${hunter.name}-rank-card.png`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+  };
+
   const share = async () => {
     const canvas = canvasRef.current;
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
@@ -4559,12 +5143,7 @@ function RankCardModal({ state, onClose }) {
     if (navigator.share && navigator.canShare({ files:[file] })) {
       await navigator.share({ title:`${hunter.name} — ${hunter.rank}-RANK`, files:[file] });
     } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'arise-rank-card.png';
-      document.body.appendChild(a); a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      download();
     }
   };
 
@@ -4574,10 +5153,13 @@ function RankCardModal({ state, onClose }) {
         <div className="cinzel" style={{ color:'var(--gold)', fontSize:16, marginBottom:16, letterSpacing:3 }}>YOUR RANK CARD</div>
         <canvas ref={canvasRef} style={{ width:'100%', borderRadius:8, border:`1px solid ${RANK_COLORS[hunter.rank]}44` }}/>
         <div style={{ display:'flex', gap:10, marginTop:16 }}>
-          <button className="btn-gold" style={{ flex:1, padding:'12px' }} onClick={share}>
-            📤 SHARE / DOWNLOAD
+          <button className="btn-gold" style={{ flex:1, padding:'12px' }} onClick={download}>
+            ⬇ DOWNLOAD PNG
           </button>
-          <button className="btn-mana" onClick={onClose}>CLOSE</button>
+          <button className="btn-mana" style={{ flex:1, padding:'12px' }} onClick={share}>
+            📤 SHARE
+          </button>
+          <button style={{ padding:'12px 16px', borderRadius:6, cursor:'pointer', background:'none', border:'1px solid var(--border)', color:'var(--text-dim)', fontFamily:'Cinzel,serif', fontSize:12 }} onClick={onClose}>✕</button>
         </div>
       </div>
     </div>
@@ -5904,7 +6486,7 @@ function HealthScreen({ state, dispatch, showNotif }) {
   const maxHp = hunter.maxHp || RANK_MAX_HP[rank] || 100;
   const hp = hunter.hp ?? maxHp;
   const hpPct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
-  const color = hpPct > 60 ? '#2ECC71' : hpPct > 30 ? '#F39C12' : '#E74C3C';
+  const color = '#E74C3C';
   const isLow = hpPct <= 30;
   const isCritical = hpPct <= 15;
 
